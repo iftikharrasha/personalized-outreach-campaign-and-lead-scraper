@@ -8,13 +8,16 @@
 
 | Document | Purpose |
 |---|---|
-| **PROJECT_PLAN.md** *(this file)* | High-level vision, decisions, phase index, working protocol |
-| [PHASE_0_PREREQUISITES.md](./PHASE_0_PREREQUISITES.md) | One-time setup the user must do before any coding |
-| [PHASE_1_FOUNDATION.md](./PHASE_1_FOUNDATION.md) | Database, Prisma schema, Next.js shell, basic campaign CRUD |
-| [PHASE_2_SCRAPER.md](./PHASE_2_SCRAPER.md) | Playwright worker, Google Maps extraction, dedupe, lead insertion |
-| [PHASE_3_RELIABILITY.md](./PHASE_3_RELIABILITY.md) | Block detection, smart waits, worker crash recovery, run status polling |
-| [PHASE_4_POLISH.md](./PHASE_4_POLISH.md) | Bulk actions, notes, search/filter, CSV export, toasts |
-| [PHASE_5_QA_AND_HARDENING.md](./PHASE_5_QA_AND_HARDENING.md) | Data flow parity tests, MVP definition-of-done, manual QA checklist |
+| **PROJECT_PLAN.md** *(this file)* | High-level vision, decisions, phase index, working protocol, implementation checklist |
+| [design/DESIGN_SYSTEM.md](./design/DESIGN_SYSTEM.md) | Wise-inspired design language — colors, typography, spacing, components |
+| [design/DESIGN_SCREENS.md](./design/DESIGN_SCREENS.md) | Screen-by-screen layout specs and wireframes |
+| [design/screens/](./design/screens/) | Exported mockup screenshots (populated after Claude Design session) |
+| [implementation/PHASE_0_PREREQUISITES.md](./implementation/PHASE_0_PREREQUISITES.md) | One-time setup the user must do before any coding |
+| [implementation/PHASE_1_FOUNDATION.md](./implementation/PHASE_1_FOUNDATION.md) | Database, Prisma schema, Next.js shell, basic campaign CRUD |
+| [implementation/PHASE_2_SCRAPER.md](./implementation/PHASE_2_SCRAPER.md) | Playwright worker, Google Maps extraction, dedupe, lead insertion |
+| [implementation/PHASE_3_RELIABILITY.md](./implementation/PHASE_3_RELIABILITY.md) | Block detection, smart waits, worker crash recovery, run status polling |
+| [implementation/PHASE_4_POLISH.md](./implementation/PHASE_4_POLISH.md) | Bulk actions, notes, search/filter, CSV export, toasts |
+| [implementation/PHASE_5_QA_AND_HARDENING.md](./implementation/PHASE_5_QA_AND_HARDENING.md) | Data flow parity tests, MVP definition-of-done, manual QA checklist |
 
 ---
 
@@ -322,3 +325,88 @@ USER_AGENTS='["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ..."
 ---
 
 *End of master plan. Implementation details live in the phase documents linked in Section 0.*
+
+---
+
+## 13. Implementation Checklist
+
+> **For Claude Code:** Before building each component, verify against the mockup in `docs/design/screens/`. Use this checklist as a quality gate per slice.
+
+### Before starting any slice
+
+- [ ] Read `docs/design/DESIGN_SYSTEM.md` — confirm color tokens, type scale, radius values
+- [ ] Find the relevant mockup in `docs/design/screens/` and keep it open as reference
+- [ ] Confirm Tailwind config has the locked palette (`#9fe870`, `#e8ebe6`, `#0e0f0c`, etc.)
+- [ ] Confirm shadcn is initialized with neutral theme + CSS variables enabled
+
+### Global shell (Slice 1.2)
+
+- [ ] Left sidebar: 240px expanded / 64px collapsed, `canvas-soft` background
+- [ ] Sidebar toggle button works (chevron, bottom of sidebar)
+- [ ] Single nav item: Google Maps Scraper with map-pin icon
+- [ ] Active nav item: `primary` green left border + `primary-pale` row background
+- [ ] Header bar: 64px, white, 1px bottom border, logo left / theme toggle right
+- [ ] Dark mode toggle stores preference in `localStorage`
+
+### Campaign List page (Slice 1.6)
+
+- [ ] Page background: `canvas-soft`
+- [ ] 4 cards per row at ≥1280px, 2 at tablet
+- [ ] Card: white, `rounded-[24px]`, 24px padding, 24px gap
+- [ ] Card contents match DESIGN_SCREENS.md Screen 1 order (name → keyword → location → status dot → stats → progress bar → last run → buttons)
+- [ ] Progress bar: 4px tall, `primary` green fill
+- [ ] Status dot: 8px circle, correct color per status
+- [ ] Filter tabs and search input above card grid
+- [ ] [+ New Campaign] primary green button top-right
+- [ ] Empty state: icon + heading + hint + button, centered
+
+### Create Campaign modal (Slice 1.7)
+
+- [ ] Width 520px, `rounded-[24px]`, 24px padding, white bg
+- [ ] Inputs: 44px height, `rounded-[12px]`
+- [ ] "Entire State" checkbox hides city input
+- [ ] Keyword auto-fills from category dropdown selection
+- [ ] Validation errors show in `negative` red below field
+- [ ] [Cancel] secondary, [Create →] primary green
+
+### Campaign Detail page (Slice 1.8)
+
+- [ ] 4 stat cards: equal width, white, `rounded-[24px]`, large number (40px/900)
+- [ ] Table: white card, `rounded-[24px]`, sticky header
+- [ ] Table rows: 56px tall, hover `canvas-soft`
+- [ ] Status badges: color-coded per status table in DESIGN_SCREENS.md
+- [ ] Scrape-running banner: `warning` yellow bg, icon + count + [Stop] button
+- [ ] Bulk action bar: visible only when rows selected, `canvas-soft` bg
+- [ ] Run history: collapsible panel below table, chevron toggle
+
+### Run Campaign modal (Slice 2.7)
+
+- [ ] Radio option 1 selected by default
+- [ ] Warning text visible only when option 2 is selected (negative red)
+- [ ] [Start Scraping →]: primary green
+
+### Inline status edit (Slice 4.1)
+
+- [ ] Status badge is clickable (cursor-pointer)
+- [ ] Dropdown appears in-place, 5 options
+- [ ] On selection: optimistic update + toast
+
+### Notes (Slice 4.2)
+
+- [ ] Notes cell clickable → opens textarea or modal
+- [ ] Save → toast + lead_history row written
+
+### Toasts (all phases)
+
+- [ ] Bottom-right, 16px from edges
+- [ ] Success: `positive-pale` bg, auto-dismiss 3s
+- [ ] Error: white card with `negative` left border, manual dismiss
+- [ ] Warning: `warning`/20 bg, manual dismiss
+
+### Before phase sign-off
+
+- [ ] All pages match their mockup in `docs/design/screens/` (spacing, colors, radius, typography)
+- [ ] Dark mode works for all components
+- [ ] Focus rings visible on all interactive elements (keyboard navigation)
+- [ ] No hardcoded hex values in components — all Tailwind classes
+- [ ] No custom CSS except `globals.css` baseline
