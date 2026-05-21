@@ -27,7 +27,7 @@
 | 1.8 | Build Campaign List page (`/googlemaps`) — empty-state + cards grid + filter tabs | COMPLETED |
 | 1.9 | Build Create + Edit Campaign modals + `POST` / `PUT /api/campaigns` | COMPLETED |
 | 1.10 | Build Campaign Detail page (`/googlemaps/[id]`) — header, stat cards, empty leads table | COMPLETED |
-| 1.11 | Implement Pause / Archive / Restore (via the campaign update endpoint) | COMPLETED |
+| 1.11 | Implement Pause / Archive / Restore / Delete (campaign update + delete endpoints) | COMPLETED |
 | 1.12 | Build Manager dashboard (`/`) — KPI rows, run-history card, Winning Leads table (reads live + derived data) | COMPLETED |
 | 1.13 | Set up Vitest + write first integration test (`data-flow.test.ts`, campaign CRUD path) | COMPLETED |
 
@@ -311,7 +311,7 @@ Reference: `prototype/screens-detail.jsx` (`CampaignDetailPage`), `DESIGN_SCREEN
 
 ---
 
-### Slice 1.11 — Pause / Archive / Restore
+### Slice 1.11 — Pause / Archive / Restore / Delete
 
 **Status:** COMPLETED — 2026-05-21
 
@@ -320,7 +320,13 @@ Reference: `prototype/screens-detail.jsx` (`CampaignDetailPage`), `DESIGN_SCREEN
 - Wired from the card overflow menu, the card pause button, and the Edit modal's archive button.
 - Cards/list update optimistically via TanStack Query; each action fires a toast.
 
-**Test notes:** Integration test exercises all three transitions.
+**Post-design addition — Delete campaign:**
+- `DELETE /api/campaigns/[id]` — returns 204; Prisma cascades to all related `leads`, `scrape_runs`, and `lead_history` rows.
+- Delete is surfaced in the `CampaignCard` three-dot menu (`MoreHorizontal`) as a `danger`-styled item at the bottom, below a divider.
+- Clicking "Delete" does **not** fire the request immediately — the card swaps into an inline confirmation state (red-outlined card variant) showing the campaign name, a warning ("cannot be undone"), and two buttons: **Cancel** (reverts to normal card) and **Delete permanently** (fires the `DELETE` then refetches and fires a success toast).
+- This was missed in the original design and added as a discrete post-Phase 1 UI addition before Phase 2 began.
+
+**Test notes:** Integration test exercises PAUSED → ARCHIVED → ACTIVE transitions. Delete is covered by the `afterAll` cleanup (`deleteMany`) in `data-flow.test.ts`.
 
 ---
 
@@ -368,7 +374,7 @@ Reference: `prototype/dashboard.jsx` (`DashboardPage`, `BlockTimerCard`, `TrendB
 
 - `npm run dev` starts the Next.js app; the admin shell renders on all three routes.
 - `/` shows the Manager dashboard; `/googlemaps` lists campaigns; `/googlemaps/[id]` shows campaign detail.
-- You can create, edit, view, pause, archive, and restore campaigns through the UI.
+- You can create, edit, view, pause, archive, restore, and **delete** campaigns through the UI.
 - Every page visually matches the prototype in light and dark mode.
 - `npm run test` passes (unit + integration).
 - Master plan progress table updated to `COMPLETED`.

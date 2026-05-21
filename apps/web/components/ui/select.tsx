@@ -73,7 +73,10 @@ export function Select({ value, onChange, children, placeholder, disabled, class
       setCoords({ top: r.bottom + 4, left: r.left, width: r.width });
     };
     measure();
-    const onScroll = () => setOpen(false);
+    const onScroll = (e: Event) => {
+      if (popoverRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", measure);
     return () => { window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", measure); };

@@ -25,6 +25,9 @@ export default defineConfig({
           include: ["tests/integration/**/*.test.ts"],
           environment: "node",
           testTimeout: 30000,
+          // Serial execution: integration tests share a real DB — parallel file
+          // execution causes FK races between beforeAll/afterAll across files.
+          fileParallelism: false,
         },
         resolve: {
           alias: { "@shared": resolve(__dirname, "packages/shared/src") },
