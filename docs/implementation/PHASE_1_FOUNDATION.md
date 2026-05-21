@@ -2,10 +2,10 @@
 
 > **Goal:** A running Next.js app with the admin shell, a migrated PostgreSQL schema, full Create/Read/Update/Archive flow for campaigns, and a Manager dashboard. No scraper yet.
 
-**Status:** NOT STARTED
-**Last Updated:** –
+**Status:** IN PROGRESS — slices 1.1, 1.2, 1.3, 1.5 done; 1.4 blocked on PostgreSQL; 1.6+ pending
+**Last Updated:** 2026-05-21
 
-**Prerequisites:** [Phase 0](./PHASE_0_PREREQUISITES.md) completed.
+**Prerequisites:** [Phase 0](./PHASE_0_PREREQUISITES.md) — all done except PostgreSQL install (Slice 0.2/0.3), which blocks Slice 1.4.
 
 > **Design contract:** every UI slice must match the approved prototype in [`docs/design/prototype/`](../design/prototype/). Read [`DESIGN_SYSTEM.md`](../design/DESIGN_SYSTEM.md) and [`DESIGN_SCREENS.md`](../design/DESIGN_SCREENS.md) before building UI. The prototype components (`Sidebar`, `Header`, `StatCard`, `RunHistoryCard`, `BulkActionsBar`, `Select`, `Button`, `Badge`, `Card`, modals) map 1:1 to the shadcn components you build here.
 >
@@ -17,11 +17,11 @@
 
 | # | Slice | Status |
 |---|---|---|
-| 1.1 | Bootstrap monorepo (root `package.json`, `tsconfig.json`, workspaces) | NOT STARTED |
-| 1.2 | Initialize Next.js 14 app in `apps/web` with TypeScript + Tailwind + shadcn/ui | NOT STARTED |
-| 1.3 | Set up Prisma in `prisma/` and write `schema.prisma` (all 4 tables) | NOT STARTED |
-| 1.4 | Run first migration and seed `.env` / `.env.example` | NOT STARTED |
-| 1.5 | Create `packages/shared` with normalization helpers + their unit tests | NOT STARTED |
+| 1.1 | Bootstrap monorepo (root `package.json`, `tsconfig.json`, workspaces) | COMPLETED |
+| 1.2 | Initialize Next.js 16 app in `apps/web` with TypeScript + Tailwind + shadcn/ui | COMPLETED |
+| 1.3 | Set up Prisma in `prisma/` and write `schema.prisma` (all 4 tables) | COMPLETED |
+| 1.4 | Run first migration and seed `.env` / `.env.example` | BLOCKED — needs PostgreSQL installed + DB password |
+| 1.5 | Create `packages/shared` with normalization helpers + their unit tests | COMPLETED |
 | 1.6 | Build the admin shell — `Sidebar` (inverted, collapsible) + `Header` (breadcrumb, theme toggle) | NOT STARTED |
 | 1.7 | Build the shared UI kit — `Button`, `Card`, `Badge`, `StatCard`, `Select`, `Input`, `Checkbox`, `Modal`, `Tabs`, `Progress`, toasts | NOT STARTED |
 | 1.8 | Build Campaign List page (`/googlemaps`) — empty-state + cards grid + filter tabs | NOT STARTED |
@@ -47,38 +47,60 @@
 
 ### Slice 1.1 — Monorepo bootstrap
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — 2026-05-21
 
-- Root `package.json` declares workspaces: `apps/*`, `packages/*`.
-- Root `tsconfig.json` with `"strict": true`, path aliases for `@shared/*` → `packages/shared/src/*`.
-- Add `.gitignore` entries: `node_modules`, `.env`, `.next`, `dist`, `playwright-report`.
-- Add `concurrently` as a root devDependency (used later by `npm run dev`).
+- Root `package.json` declares workspaces `apps/*`, `packages/*`, plus `dev` / `build` / `worker` / `test*` scripts.
+- Root `tsconfig.json` with `"strict": true`, `noUncheckedIndexedAccess`, and the `@shared/*` → `packages/shared/src/*` path alias.
+- `.gitignore` covers `node_modules`, `.env`, `.next`, `dist`, `coverage`, `playwright-report`, the scraper's persistent context, etc.
+- Root devDependencies installed: `concurrently`, `typescript` (5.9.3).
 
-**Test notes:** None — pure scaffolding.
+**Test notes:** None — pure scaffolding. Verified `npx tsc --version` and valid JSON.
 
 ---
 
 ### Slice 1.2 — Next.js app
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — 2026-05-21
 
-- `apps/web` is a Next.js 14+ App Router project, TypeScript, Tailwind enabled.
-- Initialize shadcn/ui with neutral palette + New York style.
-- **Copy the Tailwind color block verbatim** from [`DESIGN_SYSTEM.md`](../design/DESIGN_SYSTEM.md) into `tailwind.config` — including dark tokens (`d-canvas`, `d-ink`, …), `fontFamily.sans = Inter`, `borderRadius.card = 24px`. `darkMode: 'class'`.
-- Add the `globals.css` baseline from the prototype: keyframes (`fadein`, `scalein`, `pulsegreen`, `indeterm`), scrollbar styling, the `2px #9fe870` focus ring.
-- Install these shadcn components up front: `button`, `card`, `dialog`, `input`, `select`, `badge`, `tabs`, `table`, `checkbox`, `textarea`, `toast`, `progress`, `dropdown-menu`.
-- Add TanStack Query provider + a dark-mode provider (persists to `localStorage` key `outrich-dark`) in the root layout.
-- Route skeleton: `app/page.tsx` (dashboard), `app/googlemaps/page.tsx` (list), `app/googlemaps/[id]/page.tsx` (detail) — placeholders for now.
+- `apps/web` is a **Next.js 16** App Router project (React 19), TypeScript, Tailwind enabled. Scaffolded manually (not `create-next-app`) for a clean workspace fit.
+- shadcn/ui initialized via `components.json` (New York style, neutral base, `cn` helper in `lib/utils.ts`). The actual shadcn component files are added in **Slice 1.7** (the shared UI kit) — per the phase plan, not here.
+- Tailwind color block copied **verbatim** from [`DESIGN_SYSTEM.md`](../design/DESIGN_SYSTEM.md) into `tailwind.config.ts` — light + dark tokens, `fontFamily.sans = Inter`, `borderRadius.card = 24px`, `darkMode: 'class'`. Keyframes (`fadein`, `scalein`, `pulsegreen`, `indeterm`) live in the Tailwind config's `animation`.
+- `globals.css` baseline from the prototype: Inter font, body background (light + dark), scrollbar styling, the `2px #9fe870` focus ring.
+- `Providers` wires the TanStack Query provider; `ThemeProvider` handles dark mode, persisting to `localStorage` key `outrich-dark`.
+- Route skeleton in place: `app/page.tsx` (dashboard), `app/googlemaps/page.tsx` (list), `app/googlemaps/[id]/page.tsx` (detail) — placeholders.
 
-**Test notes:** Smoke test — `npm run dev` boots, all three routes render without error.
+**Decisions made during this slice:**
+- **Next.js 16 + React 19** instead of 14. The Next 14.x line has unpatched critical/high `npm audit` advisories; they are only fixed in 16.x. The locked stack (`PROJECT_PLAN.md` §3) now reads "Next.js 16".
+- **Next 16 consequence:** route `params` is a `Promise` — `page.tsx` for `[id]` routes must `await params`. The detail page placeholder already does this; later route work must follow suit.
+
+**Test notes:** ✅ `next build` compiles + type-checks all 3 routes; dev server smoke-tested — `/`, `/googlemaps`, `/googlemaps/[id]` all return `200`.
+
+#### Locked dependency versions (verified 2026-05-21)
+
+| Package | Installed | Latest | Note |
+|---|---|---|---|
+| next | 16.2.6 | 16.2.6 | ✅ latest Next 16 |
+| react / react-dom | 19.2.6 | 19.2.6 | ✅ latest |
+| @tanstack/react-query | 5.100.11 | 5.100.11 | ✅ latest |
+| lucide-react | 1.16.0 | 1.16.0 | ✅ latest (upgraded from 0.468 — icons only) |
+| vitest | 4.1.7 | 4.1.7 | ✅ latest (upgraded from 2.x — cleared 5 transitive `esbuild`/`vite` advisories) |
+| typescript | 5.9.3 | 6.0.x | held on 5.9 — TS 6.0 is days-old; not adopting mid-build |
+| prisma / @prisma/client | 6.19.3 | 7.8.0 | held on 6.x by decision (see Slice 1.3) |
+| tailwindcss | 3.4.19 | 4.3.0 | held on 3.x — Tailwind 4 is a config-format rewrite; the design system + prototype assume v3 syntax |
+
+**`npm audit` status:** 2 moderate, both the *same* advisory — `postcss@8.4.31` **bundled inside the `next` package** (`node_modules/next/node_modules/postcss`). Our own `postcss` is `8.5.15` (safe) and a root `overrides` pins it; npm cannot rewrite the copy baked into Next's published artifact. It is a build-time CSS tool with no localhost runtime exposure and will clear when Next ships a patch bumping its bundled postcss. **Not actionable on our side** — do not run `npm audit fix --force` (it would try to change the Next major).
 
 ---
 
 ### Slice 1.3 — Prisma schema
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — 2026-05-21
 
-Models to define (camelCase Prisma names, snake_case DB names via `@map`):
+`prisma/schema.prisma` written with all four models, three enums, indexes, and the partial-unique dedupe constraints. Prisma 6.19.x added as a root dependency (`@prisma/client`) + devDependency (`prisma`); root scripts `db:migrate` / `db:generate` / `db:studio` added. `npx prisma validate` passes; `npx prisma generate` produces the client. The actual migration against the DB happens in Slice 1.4.
+
+> Note: Prisma 7 is available but the schema targets the stable 6.19.x line for this phase — upgrading is a separate decision.
+
+Models defined (camelCase Prisma names, snake_case DB names via `@map`):
 
 - `Campaign` → `campaigns`
 - `Lead` → `leads`
@@ -164,33 +186,36 @@ Mirrors the column spec below. Enforce:
 
 ### Slice 1.4 — First migration + `.env`
 
-**Status:** NOT STARTED
+**Status:** BLOCKED — waiting on Phase 0 Slice 0.2/0.3 (PostgreSQL install + `lead_scraper` database) and your `postgres` password.
 
-**Claude will pause here** and prompt you for:
+**Already done (didn't need the DB):**
+- `.env.example` written (committed) with all keys + placeholders.
+- `.env` written (git-ignored) — but `DATABASE_URL` still has a `<password>` **placeholder**.
+- `npx prisma generate` already run (client is generated).
 
-1. Your PostgreSQL `postgres` user password.
-
-Claude will then:
-
-- Write `DATABASE_URL="postgresql://postgres:<password>@localhost:5432/lead_scraper"` into `.env`.
-- Write a sanitized `.env.example` with placeholders.
-- Run `npx prisma migrate dev --name init`.
-- Run `npx prisma generate`.
+**Remaining — Claude will do this once you provide the password:**
+1. Replace `<password>` in `.env`'s `DATABASE_URL` with your real `postgres` password.
+2. Run `npx prisma migrate dev --name init` — creates the 4 tables in `lead_scraper`.
+3. Re-run `npx prisma generate`.
 
 After this slice, the DB has all 4 tables and your `.env` is real.
 
-**Test notes:** None. Slice 1.10 verifies via integration test.
+**Test notes:** None. Slice 1.13 verifies via integration test.
 
 ---
 
 ### Slice 1.5 — `packages/shared` + normalization unit tests
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — 2026-05-21
+
+`packages/shared` created (`@outrich/shared`) with `src/normalize.ts` + `src/index.ts`. Vitest 2.1.x added at the root with a minimal `vitest.config.ts` (the full unit/integration project split is Slice 1.13). All 14 unit tests in `tests/unit/normalize.test.ts` pass.
+
+**Decision made during this slice:** the phone threshold was raised from 7 to **10 digits**. The doc's required example `"+1 555 123" → null` actually has 7 digits, which a `≥7` rule would *keep* — contradicting the example's intent. 10 digits is the floor for a dialable number (US 10-digit / international with country code). The spec text below was updated to match.
 
 Exports:
 
 - `normalizeDomain(url: string | null): string | null` — strips protocol, www, paths, trailing slashes; lowercase; returns null for empty/garbage.
-- `normalizePhone(phone: string | null): string | null` — keeps digits only; null if fewer than 7 digits.
+- `normalizePhone(phone: string | null): string | null` — keeps digits only; null if fewer than **10** digits (a dialable number — US 10-digit or international with country code; shorter strings are fragments).
 - `normalizeBusinessName(name: string): string` — trims, collapses whitespace, removes trailing `, Inc`, `LLC`, `Ltd` (case-insensitive).
 - `LeadStatus`, `CampaignStatus`, `ScrapeRunStatus` re-exports from Prisma client for cross-package use.
 
@@ -203,7 +228,7 @@ Exports:
 - `null` → `null`
 - `"  "` → `null`
 - `"(555) 123-4567"` → `"5551234567"`
-- `"+1 555 123"` → `null` (under 7 digits)
+- `"+1 555 123"` → `null` (only 7 digits — a fragment, not dialable)
 - `"Joe's Diner, LLC"` → `"Joe's Diner"`
 
 ---

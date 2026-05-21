@@ -1,0 +1,127 @@
+// Prisma schema for the Outrich lead scraper.
+// Shared by apps/web and apps/scraper. Column spec: docs/implementation/PHASE_1_FOUNDATION.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────── Enums ─────────
+
+enum CampaignStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  REPLIED
+  IGNORED
+  CLOSED
+}
+
+enum ScrapeRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// ───────── Models ─────────
+
+model Campaign {
+  id          String         @id @default(uuid()) @db.Uuid
+  name        String         @db.VarChar(255)
+  keyword     String         @db.VarChar(500)
+  category    String         @db.VarChar(50)
+  country     String         @db.VarChar(100)
+  state       String         @db.VarChar(100)
+  city        String?        @db.VarChar(100)
+  source      String         @default("google_maps") @db.VarChar(50)
+  status      CampaignStatus @default(ACTIVE)
+  notifyEmail String?        @map("notify_email") @db.VarChar(255)
+  totalLeads  Int            @default(0) @map("total_leads")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  leads      Lead[]
+  scrapeRuns ScrapeRun[]
+
+  @@map("campaigns")
+}
+
+model Lead {
+  id               String     @id @default(uuid()) @db.Uuid
+  campaignId       String     @map("campaign_id") @db.Uuid
+  scrapeRunId      String?    @map("scrape_run_id") @db.Uuid
+  businessName     String     @map("business_name") @db.VarChar(500)
+  normalizedName   String?    @map("normalized_name") @db.VarChar(500)
+  websiteUrl       String?    @map("website_url")
+  normalizedDomain String?    @map("normalized_domain") @db.VarChar(255)
+  phone            String?    @db.VarChar(50)
+  normalizedPhone  String?    @map("normalized_phone") @db.VarChar(50)
+  // email is manual only — never scraped. NULL until the operator fills it in.
+  email            String?    @db.VarChar(255)
+  address          String?
+  status           LeadStatus @default(NEW)
+  notes            String?
+  // raised: dollar amount on a CLOSED lead; feeds the dashboard earnings rollup.
+  raised           Int?
+  isDuplicate      Boolean    @default(false) @map("is_duplicate")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  campaign  Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  scrapeRun ScrapeRun?    @relation(fields: [scrapeRunId], references: [id], onDelete: SetNull)
+  history   LeadHistory[]
+
+  @@unique([campaignId, normalizedDomain], name: "uniq_campaign_domain")
+  @@unique([campaignId, normalizedPhone], name: "uniq_campaign_phone")
+  @@index([campaignId])
+  @@index([status])
+  @@index([normalizedDomain])
+  @@index([normalizedPhone])
+  @@map("leads")
+}
+
+model ScrapeRun {
+  id             String          @id @default(uuid()) @db.Uuid
+  campaignId     String          @map("campaign_id") @db.Uuid
+  keywordUsed    String          @map("keyword_used") @db.VarChar(500)
+  startedAt      DateTime?       @map("started_at")
+  finishedAt     DateTime?       @map("finished_at")
+  status         ScrapeRunStatus @default(PENDING)
+  newLeadsCount  Int             @default(0) @map("new_leads_count")
+  duplicateCount Int             @default(0) @map("duplicate_count")
+  durationSec    Int?            @map("duration_sec")
+  errorMessage   String?         @map("error_message")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leads    Lead[]
+
+  @@index([campaignId])
+  @@index([status])
+  @@map("scrape_runs")
+}
+
+model LeadHistory {
+  id             String      @id @default(uuid()) @db.Uuid
+  leadId         String      @map("lead_id") @db.Uuid
+  previousStatus LeadStatus? @map("previous_status")
+  newStatus      LeadStatus? @map("new_status")
+  note           String?
+  changedAt      DateTime    @default(now()) @map("changed_at")
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@map("lead_history")
+}

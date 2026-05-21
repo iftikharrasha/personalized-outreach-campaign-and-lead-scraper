@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# Build output
+.next/
+dist/
+build/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+playwright-report/
+test-results/
+
+# Prisma
+prisma/*.db
+
+# Playwright persistent context
+apps/scraper/.playwright-data/
+
+# Editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json

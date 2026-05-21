@@ -1,0 +1,37 @@
+{
+  "name": "outrich-lead-scraper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal lead generation scraper & campaign manager — runs on localhost",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspace apps/web",
+    "worker": "npm run worker --workspace apps/scraper",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "prisma": "^6.1.0",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

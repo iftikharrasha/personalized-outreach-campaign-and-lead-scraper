@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    font-family: "Inter", system-ui, sans-serif;
+  }
+
+  body {
+    background: #e8ebe6;
+    color: #0e0f0c;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  html.dark body {
+    background: #14150f;
+    color: #f6f7f3;
+  }
+
+  /* Hide native number input arrows */
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 999px;
+  }
+  html.dark ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Selection */
+  ::selection {
+    background: #9fe870;
+    color: #0e0f0c;
+  }
+
+  /* Focus rings */
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid #9fe870;
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+}

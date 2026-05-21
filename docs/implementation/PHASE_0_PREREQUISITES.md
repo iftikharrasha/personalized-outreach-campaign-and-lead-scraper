@@ -2,8 +2,8 @@
 
 > **Goal:** Get your machine ready before any code is written. This phase is **done by you, not Claude**. Once everything here is checked off, tell Claude "Phase 0 done, start Phase 1."
 
-**Status:** NOT STARTED
-**Last Updated:** –
+**Status:** IN PROGRESS — only PostgreSQL install remains
+**Last Updated:** 2026-05-21
 
 ---
 
@@ -11,99 +11,77 @@
 
 | # | Slice | Status |
 |---|---|---|
-| 0.1 | Install Node.js 20 LTS or newer | NOT STARTED |
-| 0.2 | Install PostgreSQL 15+ locally | NOT STARTED |
-| 0.3 | Create the `lead_scraper` database | NOT STARTED |
-| 0.4 | Confirm `git` is installed and repo is cloned | NOT STARTED |
-| 0.5 | (Windows-specific) Confirm PowerShell can run scripts | NOT STARTED |
-| 0.6 | Decide on an editor (VS Code recommended) | NOT STARTED |
+| 0.1 | Install Node.js 20 LTS or newer | COMPLETED — Node v22.18.0, npm 10.9.3 |
+| 0.2 | Install PostgreSQL 15+ locally (includes pgAdmin) | NOT STARTED — **action needed by you** |
+| 0.3 | Create the `lead_scraper` database | NOT STARTED — blocked on 0.2 |
+| 0.4 | Confirm `git` is installed and repo is cloned | COMPLETED — git 2.37.3, repo cloned |
+| 0.5 | (Windows-specific) Confirm PowerShell can run scripts | COMPLETED — confirmed by user |
+| 0.6 | Decide on an editor (VS Code recommended) | COMPLETED — VS Code |
 
 ---
 
 ## Slice 0.1 — Node.js
 
-**Status:** NOT STARTED
-
-- Install Node 20 LTS or newer from <https://nodejs.org>.
-- Verify in PowerShell:
-  ```powershell
-  node --version
-  npm --version
-  ```
-- Expected: `v20.x.x` or higher, `10.x.x` or higher.
+**Status:** COMPLETED — verified `node v22.18.0`, `npm 10.9.3` (well past the Node 20 LTS minimum).
 
 ---
 
 ## Slice 0.2 — PostgreSQL
 
-**Status:** NOT STARTED
+**Status:** NOT STARTED — **this is the one thing you still need to do.**
 
-- Install PostgreSQL 15+ from <https://www.postgresql.org/download/windows/>.
-- During install, **remember the password** you set for the `postgres` superuser. You'll paste it into `.env` later.
-- Verify:
-  ```powershell
-  psql --version
-  ```
-- Expected: `psql (PostgreSQL) 15.x` or higher.
+PostgreSQL is not installed on this machine. The official Windows installer **bundles pgAdmin**, so installing PostgreSQL gives you the database server *and* the pgAdmin GUI you plan to use.
+
+1. Download the installer from <https://www.postgresql.org/download/windows/> (use the EDB installer, PostgreSQL 15 or 16).
+2. Run it. During setup:
+   - Keep the default components (PostgreSQL Server, **pgAdmin 4**, Command Line Tools).
+   - **Set a password for the `postgres` superuser and write it down** — Claude needs it for `.env` in Slice 1.4.
+   - Keep the default port `5432`.
+3. Verify in PowerShell:
+   ```powershell
+   & "C:\Program Files\PostgreSQL\16\bin\psql.exe" --version
+   ```
+   (Adjust `16` to `15` if you installed v15.)
+- Expected: `psql (PostgreSQL) 16.x` or `15.x`.
+
+> Optionally add `C:\Program Files\PostgreSQL\16\bin` to your `PATH` so `psql` works without the full path. Not required — pgAdmin and Prisma both work fine without it.
 
 ---
 
-## Slice 0.3 — Create the database
+## Slice 0.3 — Create the `lead_scraper` database
 
-**Status:** NOT STARTED
+**Status:** NOT STARTED — blocked on Slice 0.2.
 
-- Open PowerShell and run:
-  ```powershell
-  createdb -U postgres lead_scraper
-  ```
-  (You'll be prompted for the postgres password from Slice 0.2.)
-- Verify:
-  ```powershell
-  psql -U postgres -l
-  ```
-- Expected: `lead_scraper` appears in the list.
+You'll use **pgAdmin** for this:
 
-> If `createdb` is not recognized, add PostgreSQL's `bin/` folder (e.g., `C:\Program Files\PostgreSQL\15\bin`) to your `PATH` environment variable.
+1. Open **pgAdmin 4** (installed alongside PostgreSQL).
+2. Expand **Servers → PostgreSQL** (enter the `postgres` password when prompted).
+3. Right-click **Databases → Create → Database…**.
+4. Name it exactly `lead_scraper`, leave the owner as `postgres`, click **Save**.
+
+`lead_scraper` should now appear under Databases.
+
+> CLI alternative, if you added `psql` to PATH: `createdb -U postgres lead_scraper`.
 
 ---
 
 ## Slice 0.4 — Git & repo
 
-**Status:** NOT STARTED
-
-- This repo is already cloned to `e:\Github\personalized-outreach-campaign-and-lead-scraper`.
-- Verify:
-  ```powershell
-  git --version
-  git status
-  ```
+**Status:** COMPLETED — verified `git 2.37.3`; repo cloned to `e:\Github\personalized-outreach-campaign-and-lead-scraper`.
 
 ---
 
 ## Slice 0.5 — PowerShell execution policy (Windows)
 
-**Status:** NOT STARTED
-
-Some npm scripts run `.ps1` files. Allow them:
-
-```powershell
-Get-ExecutionPolicy
-```
-
-If it returns `Restricted`, run (as Administrator):
-
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
+**Status:** COMPLETED — confirmed by user; PowerShell runs scripts fine.
 
 ---
 
 ## Slice 0.6 — Editor
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — VS Code in use.
 
-- VS Code recommended: <https://code.visualstudio.com>.
-- Helpful extensions: **Prisma**, **Tailwind CSS IntelliSense**, **ESLint**.
+Recommended extensions (install when convenient): **Prisma**, **Tailwind CSS IntelliSense**, **ESLint**.
 
 ---
 

@@ -68,7 +68,7 @@ These came from real constraints and honest assessment. **Non-negotiable for MVP
 | Layer | Technology |
 |---|---|
 | Language | **TypeScript** (everywhere — web and worker) |
-| Frontend | Next.js 14+ (App Router) |
+| Frontend | Next.js 16 (App Router) + React 19 |
 | UI Components | shadcn/ui + Tailwind CSS |
 | Database | PostgreSQL (local) |
 | ORM | Prisma |
@@ -99,20 +99,27 @@ A design pass was completed in Claude Design. The approved prototype lives in [`
 
 Visual decisions (colors, typography, components) are specified in [`design/DESIGN_SYSTEM.md`](./design/DESIGN_SYSTEM.md); screen structure and behavior in [`design/DESIGN_SCREENS.md`](./design/DESIGN_SCREENS.md).
 
+**Framework version note:** the original plan said "Next.js 14+". During Phase 1 (Slice 1.2) the build landed on **Next.js 16 + React 19** — chosen so `npm audit` is clean (the critical/high Next.js advisories are only patched in 16.x). One consequence: in Next 16 a route's `params` is a `Promise` and must be `await`ed in `page.tsx`. All implementation docs assume Next 16.
+
 ---
 
 ## 4. Repository Layout
 
 ```
 project-root/
-├── docs/                          # This plan and all phase docs
+├── docs/                          # This plan and all phase/design docs
 │   ├── PROJECT_PLAN.md
-│   ├── PHASE_0_PREREQUISITES.md
-│   ├── PHASE_1_FOUNDATION.md
-│   ├── PHASE_2_SCRAPER.md
-│   ├── PHASE_3_RELIABILITY.md
-│   ├── PHASE_4_POLISH.md
-│   └── PHASE_5_QA_AND_HARDENING.md
+│   ├── design/
+│   │   ├── DESIGN_SYSTEM.md
+│   │   ├── DESIGN_SCREENS.md
+│   │   └── prototype/             # Approved working prototype
+│   └── implementation/
+│       ├── PHASE_0_PREREQUISITES.md
+│       ├── PHASE_1_FOUNDATION.md
+│       ├── PHASE_2_SCRAPER.md
+│       ├── PHASE_3_RELIABILITY.md
+│       ├── PHASE_4_POLISH.md
+│       └── PHASE_5_QA_AND_HARDENING.md
 ├── prisma/
 │   └── schema.prisma
 ├── apps/
@@ -160,12 +167,12 @@ project-root/
 
 | Phase | Doc | Delivers | Status | Last Updated |
 |---|---|---|---|---|
-| 0 | [PHASE_0_PREREQUISITES.md](./PHASE_0_PREREQUISITES.md) | Local environment ready (Node, PostgreSQL, Playwright browsers) | NOT STARTED | – |
-| 1 | [PHASE_1_FOUNDATION.md](./PHASE_1_FOUNDATION.md) | Schema migrated; campaigns CRUD UI works; project boots | NOT STARTED | – |
-| 2 | [PHASE_2_SCRAPER.md](./PHASE_2_SCRAPER.md) | Worker scrapes Google Maps end-to-end and writes leads | NOT STARTED | – |
-| 3 | [PHASE_3_RELIABILITY.md](./PHASE_3_RELIABILITY.md) | Block detection, smart waits, run cancel, polling | NOT STARTED | – |
-| 4 | [PHASE_4_POLISH.md](./PHASE_4_POLISH.md) | Bulk actions, search/filter, notes, CSV export, toasts | NOT STARTED | – |
-| 5 | [PHASE_5_QA_AND_HARDENING.md](./PHASE_5_QA_AND_HARDENING.md) | Data-flow parity tests pass; MVP DoD met | NOT STARTED | – |
+| 0 | [implementation/PHASE_0_PREREQUISITES.md](./implementation/PHASE_0_PREREQUISITES.md) | Local environment ready (Node, PostgreSQL, Playwright browsers) | IN PROGRESS — only PostgreSQL install left | 2026-05-21 |
+| 1 | [implementation/PHASE_1_FOUNDATION.md](./implementation/PHASE_1_FOUNDATION.md) | Schema migrated; campaigns CRUD UI works; project boots | IN PROGRESS — 1.1/1.2/1.3/1.5 done, 1.4 blocked | 2026-05-21 |
+| 2 | [implementation/PHASE_2_SCRAPER.md](./implementation/PHASE_2_SCRAPER.md) | Worker scrapes Google Maps end-to-end and writes leads | NOT STARTED | – |
+| 3 | [implementation/PHASE_3_RELIABILITY.md](./implementation/PHASE_3_RELIABILITY.md) | Block detection, smart waits, run cancel, polling | NOT STARTED | – |
+| 4 | [implementation/PHASE_4_POLISH.md](./implementation/PHASE_4_POLISH.md) | Bulk actions, search/filter, notes, CSV export, toasts | NOT STARTED | – |
+| 5 | [implementation/PHASE_5_QA_AND_HARDENING.md](./implementation/PHASE_5_QA_AND_HARDENING.md) | Data-flow parity tests pass; MVP DoD met | NOT STARTED | – |
 
 **Status values:** `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `COMPLETED`. Claude updates this table after finishing each phase. Within each phase doc, individual slices have their own status.
 
