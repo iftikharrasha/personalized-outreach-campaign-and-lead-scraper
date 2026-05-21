@@ -11,7 +11,7 @@
 | **PROJECT_PLAN.md** *(this file)* | High-level vision, decisions, phase index, working protocol, implementation checklist |
 | [design/DESIGN_SYSTEM.md](./design/DESIGN_SYSTEM.md) | Wise-inspired design language — colors, typography, spacing, components |
 | [design/DESIGN_SCREENS.md](./design/DESIGN_SCREENS.md) | Screen-by-screen layout specs and wireframes |
-| [design/screens/](./design/screens/) | Exported mockup screenshots (populated after Claude Design session) |
+| [design/prototype/](./design/prototype/) | The approved working prototype — the visual contract for the build |
 | [implementation/PHASE_0_PREREQUISITES.md](./implementation/PHASE_0_PREREQUISITES.md) | One-time setup the user must do before any coding |
 | [implementation/PHASE_1_FOUNDATION.md](./implementation/PHASE_1_FOUNDATION.md) | Database, Prisma schema, Next.js shell, basic campaign CRUD |
 | [implementation/PHASE_2_SCRAPER.md](./implementation/PHASE_2_SCRAPER.md) | Playwright worker, Google Maps extraction, dedupe, lead insertion |
@@ -80,6 +80,27 @@ These came from real constraints and honest assessment. **Non-negotiable for MVP
 
 ---
 
+## 3a. Design Pass — What Changed (read before building UI)
+
+A design pass was completed in Claude Design. The approved prototype lives in [`design/prototype/`](./design/prototype/) and is the **visual contract** for the build. It evolved beyond the original plan in three deliberate ways — these are now part of the spec:
+
+1. **New Manager dashboard at `/`.** A cross-campaign business cockpit: outreach funnel, freelance earnings (with monthly trend), scraper-health KPIs, a global run-history log, and a "Winning Leads" table tracking `$ raised` per closed deal. The app is now the operating layer of a freelance business, not just a scraper.
+2. **Routes shifted.** The scraper moved under a `/googlemaps` prefix to make room for the dashboard and future source adapters:
+   - `/` → Manager dashboard
+   - `/googlemaps` → Campaigns list
+   - `/googlemaps/[id]` → Campaign detail
+3. **Admin-panel shell.** A collapsible inverted-palette sidebar (Manager · Google Maps Scraper · "Coming soon" Yelp/LinkedIn stubs) + breadcrumb header wrapping every page.
+
+**Other design-driven additions:**
+- `email` on leads is a **manual field** (entered after a prospect replies) surfaced as a table column + edit modal — not scraped. `email` stays NULL until the operator fills it in.
+- `notify_email` (a.k.a. client email) — an optional contact/notification address per campaign, set in the Edit Campaign modal.
+- `raised` on closed leads — a dollar amount feeding the dashboard earnings rollup.
+- Run history is a first-class UI surface (per-campaign on detail, global on dashboard).
+
+Visual decisions (colors, typography, components) are specified in [`design/DESIGN_SYSTEM.md`](./design/DESIGN_SYSTEM.md); screen structure and behavior in [`design/DESIGN_SCREENS.md`](./design/DESIGN_SCREENS.md).
+
+---
+
 ## 4. Repository Layout
 
 ```
@@ -97,7 +118,13 @@ project-root/
 ├── apps/
 │   ├── web/                       # Next.js app (TypeScript)
 │   │   ├── app/                   # Routes (App Router)
-│   │   ├── components/
+│   │   │   ├── page.tsx           #   /                 → Manager dashboard
+│   │   │   ├── googlemaps/
+│   │   │   │   ├── page.tsx       #   /googlemaps        → Campaigns list
+│   │   │   │   └── [id]/page.tsx  #   /googlemaps/[id]   → Campaign detail
+│   │   │   └── api/               #   /api/*             → route handlers
+│   │   ├── components/            # Sidebar, Header, StatCard, RunHistoryCard,
+│   │   │                          #   BulkActionsBar, Select, modals, ui/* (shadcn)
 │   │   └── lib/                   # Shared client/server utilities
 │   └── scraper/                   # Background worker (TypeScript)
 │       ├── index.ts               # Worker loop entry
@@ -148,10 +175,15 @@ project-root/
 
 The system ships when **all** of these are true. Each is owned by a phase doc; the QA doc verifies them end-to-end.
 
+### Shell & Dashboard *(Phase 1)*
+- Admin shell: collapsible sidebar (Manager · Google Maps Scraper) + breadcrumb header
+- Manager dashboard at `/` — outreach funnel, earnings, scraper-health KPIs, global run history, Winning Leads table
+
 ### Campaign Management *(Phase 1)*
-- Create campaign with name, keyword, country/state/city
-- View campaign list with cards showing stats
-- View campaign detail page with leads table
+- Create campaign with name, category, keyword, country/state/city
+- Edit campaign (incl. optional client/notify email) — Edit Campaign modal
+- View campaign list at `/googlemaps` with cards showing stats
+- View campaign detail page at `/googlemaps/[id]` with leads table
 - Archive / restore campaigns
 
 ### Scraping *(Phase 2)*
@@ -168,10 +200,11 @@ The system ships when **all** of these are true. Each is owned by a phase doc; t
 - Run status polling is reliable (no flicker, no infinite loop)
 
 ### Lead Management *(Phase 4)*
-- Change lead status inline (instant persist + toast)
-- Add / edit notes per lead (with `lead_history` audit trail row written)
+- Change lead status inline (portaled dropdown — instant persist + toast)
+- Add / edit notes per lead via modal (with `lead_history` audit trail row written)
+- Add / edit a lead's email manually via modal (emails are never scraped)
 - Filter leads by status
-- Search leads by name / phone / notes
+- Search leads by name / phone / email / notes
 - Bulk update status
 - Bulk delete with confirmation
 
@@ -245,16 +278,18 @@ Claude will stop and prompt you when:
 
 ### Tables
 
-- **`campaigns`** — one row per search keyword. Holds name, keyword, location, status, cached `total_leads`.
-- **`leads`** — one row per business. References `campaign_id` and `scrape_run_id`. Stores raw + normalized fields and outreach status.
-- **`scrape_runs`** — one row per scrape attempt. Tracks lifecycle: `PENDING → RUNNING → COMPLETED | FAILED | CANCELLED`. Acts as the job queue.
+- **`campaigns`** — one row per search keyword. Holds name, keyword, `category`, location, status, cached `total_leads`, and an optional `notify_email` (client/notification address, set in the Edit modal).
+- **`leads`** — one row per business. References `campaign_id` and `scrape_run_id`. Stores raw + normalized fields, outreach status, manual `email` and `notes`, and `raised` (dollar amount, set when a lead is CLOSED — feeds the dashboard earnings rollup).
+- **`scrape_runs`** — one row per scrape attempt. Tracks lifecycle: `PENDING → RUNNING → COMPLETED | FAILED | CANCELLED`. Acts as the job queue. Records `new_leads_count`, `duplicate_count`, `duration`, `error_message`.
 - **`lead_history`** — audit trail. **A row is written when** (a) a lead's `status` changes, or (b) a lead's `notes` field changes. Not written on initial creation.
 
 ### Critical design rules
 
 - **Normalized domain** (`abc.com`, no protocol/www/path) and **normalized phone** (digits only) are stored alongside the raw fields. Dedupe and lookups always use normalized values.
 - **Uniqueness** is enforced at the database level per campaign: `UNIQUE(campaign_id, normalized_domain) WHERE normalized_domain IS NOT NULL` and the same for phone. Application-level dedupe is a fast path; the DB constraint is the safety net.
+- **`email` is manual, never scraped.** It stays NULL until the operator fills it in via the lead's Email modal (after a prospect shares it).
 - **Polling interval is 3 seconds.** Pin this everywhere (UI hook, docs, tests).
+- The **Manager dashboard** (`/`) reads aggregate/derived data across all campaigns — outreach funnel counts, earnings from `raised`, scraper-health KPIs, and a global view of `scrape_runs`. No new tables are required for it; it is computed from the four tables above.
 
 ---
 
@@ -289,7 +324,7 @@ USER_AGENTS='["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ..."
 | Limitation | Reality |
 |---|---|
 | Google Maps will eventually block you | Accept, wait 1–24h, retry. Not fatal for personal use. |
-| No emails in MVP | Call the phone number, or add v2 enrichment later. |
+| Emails are not scraped | The `email` field is manual — filled in after a prospect replies. Automated email enrichment is still a v2 item. |
 | Single machine, single user | Can't share campaigns or run from two laptops. |
 | Manual runs only | You must be at your computer (but you can leave it running overnight). |
 | Practical ceiling ~200–400 leads/week | If you need more, v2 (multi-query, IP rotation). |
@@ -330,83 +365,81 @@ USER_AGENTS='["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ..."
 
 ## 13. Implementation Checklist
 
-> **For Claude Code:** Before building each component, verify against the mockup in `docs/design/screens/`. Use this checklist as a quality gate per slice.
+> **For Claude Code:** The approved prototype in [`design/prototype/`](./design/prototype/) is the visual contract. Open `prototype/index.html` (or read the `.jsx` files) and match it. The prototype components (`StatCard`, `RunHistoryCard`, `BulkActionsBar`, portaled `Select`, `Button`, `Badge`, `Card`, modals) map 1:1 to the shadcn components you build. Use this checklist as a per-slice quality gate.
 
 ### Before starting any slice
 
-- [ ] Read `docs/design/DESIGN_SYSTEM.md` — confirm color tokens, type scale, radius values
-- [ ] Find the relevant mockup in `docs/design/screens/` and keep it open as reference
-- [ ] Confirm Tailwind config has the locked palette (`#9fe870`, `#e8ebe6`, `#0e0f0c`, etc.)
-- [ ] Confirm shadcn is initialized with neutral theme + CSS variables enabled
+- [ ] Read [`design/DESIGN_SYSTEM.md`](./design/DESIGN_SYSTEM.md) — color tokens, type scale, radius, component variants
+- [ ] Read the relevant section of [`design/DESIGN_SCREENS.md`](./design/DESIGN_SCREENS.md)
+- [ ] Open the matching prototype source in `design/prototype/` and keep it as reference
+- [ ] Copy the Tailwind color block verbatim from `DESIGN_SYSTEM.md` into `tailwind.config`
+- [ ] Confirm shadcn is initialized; `darkMode: 'class'`
 
-### Global shell (Slice 1.2)
+### Global shell
 
-- [ ] Left sidebar: 240px expanded / 64px collapsed, `canvas-soft` background
-- [ ] Sidebar toggle button works (chevron, bottom of sidebar)
-- [ ] Single nav item: Google Maps Scraper with map-pin icon
-- [ ] Active nav item: `primary` green left border + `primary-pale` row background
-- [ ] Header bar: 64px, white, 1px bottom border, logo left / theme toggle right
-- [ ] Dark mode toggle stores preference in `localStorage`
+- [ ] Sidebar: 240px expanded / 64px collapsed, **inverted palette** (`bg-ink` in light, `bg-canvas` in dark)
+- [ ] Two workspace nav items: **Outrich Manager** (`/`) and **Google Maps Scraper** (`/googlemaps`)
+- [ ] "Coming soon" group: Yelp + LinkedIn, disabled, with `v2` pills
+- [ ] Active nav item: 3px `primary` left bar + `primary`-tinted row
+- [ ] Account row at sidebar bottom with collapse toggle
+- [ ] Header: 64px, sticky, breadcrumb on the left, dark-mode toggle on the right
+- [ ] Dark mode toggles a `dark` class on `<html>`, persists to `localStorage` (`outrich-dark`)
 
-### Campaign List page (Slice 1.6)
+### Manager dashboard — `/`
 
-- [ ] Page background: `canvas-soft`
-- [ ] 4 cards per row at ≥1280px, 2 at tablet
-- [ ] Card: white, `rounded-[24px]`, 24px padding, 24px gap
-- [ ] Card contents match DESIGN_SCREENS.md Screen 1 order (name → keyword → location → status dot → stats → progress bar → last run → buttons)
-- [ ] Progress bar: 4px tall, `primary` green fill
-- [ ] Status dot: 8px circle, correct color per status
-- [ ] Filter tabs and search input above card grid
-- [ ] [+ New Campaign] primary green button top-right
-- [ ] Empty state: icon + heading + hint + button, centered
+- [ ] PageHeader: "Outrich Manager" + subtitle + "Open scraper" button
+- [ ] Three KPI rows (Outreach funnel · Earnings · Campaign health), each 4 `StatCard`s
+- [ ] "Closed" stat card uses `tone="ink"` (inverted dark card)
+- [ ] Monthly-trend mini bar chart inside the "Monthly avg" card
+- [ ] Block-cooldown card: live per-second countdown; "Clear to run" green state when no block
+- [ ] Global `RunHistoryCard` with `showCampaign` column
+- [ ] Winning Leads table: Raised column + `tfoot` filtered total + `BulkActionsBar`
 
-### Create Campaign modal (Slice 1.7)
+### Campaign list — `/googlemaps`
 
-- [ ] Width 520px, `rounded-[24px]`, 24px padding, white bg
-- [ ] Inputs: 44px height, `rounded-[12px]`
-- [ ] "Entire State" checkbox hides city input
-- [ ] Keyword auto-fills from category dropdown selection
-- [ ] Validation errors show in `negative` red below field
-- [ ] [Cancel] secondary, [Create →] primary green
+- [ ] Page background `canvas-soft`, content `max-w-[1480px]`
+- [ ] Card grid `grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6`
+- [ ] Campaign card: name + keyword + overflow menu · location pill + StatusDot · two-up Leads/Contacted stats · progress bar · "Last run · +N new" footer · Open/Run/pause buttons
+- [ ] Search input + status `Tabs` (All/Active/Paused/Archived with counts)
+- [ ] Empty state: map-pin circle icon, heading, copy, "Create your first campaign" button
 
-### Campaign Detail page (Slice 1.8)
+### Create / Edit Campaign modals
 
-- [ ] 4 stat cards: equal width, white, `rounded-[24px]`, large number (40px/900)
-- [ ] Table: white card, `rounded-[24px]`, sticky header
-- [ ] Table rows: 56px tall, hover `canvas-soft`
-- [ ] Status badges: color-coded per status table in DESIGN_SCREENS.md
-- [ ] Scrape-running banner: `warning` yellow bg, icon + count + [Stop] button
-- [ ] Bulk action bar: visible only when rows selected, `canvas-soft` bg
-- [ ] Run history: collapsible panel below table, chevron toggle
+- [ ] Create: 560px; Edit: 580px; both `rounded-card`
+- [ ] Category `Select` (incl. "Custom keyword…"); custom field appears only for Custom
+- [ ] Country + State side-by-side; "Scrape entire {state}" checkbox hides City
+- [ ] Live Google-Maps-query preview chip
+- [ ] Validation errors in `negative` red under each field
+- [ ] Edit modal adds the optional **Client email** field + an "Archive campaign" ghost button; Save is disabled until the form is dirty
 
-### Run Campaign modal (Slice 2.7)
+### Campaign detail — `/googlemaps/[id]`
 
-- [ ] Radio option 1 selected by default
-- [ ] Warning text visible only when option 2 is selected (negative red)
-- [ ] [Start Scraping →]: primary green
+- [ ] Header: name + status badge + keyword + location breadcrumb
+- [ ] Action buttons: Run campaign (primary, becomes destructive "Stop scraping" while running) · Export (`chip` menu) · Edit (`chip`) · Archive (`chip`)
+- [ ] Scraping banner: `warning` yellow card, sparkles icon, live count, **indeterminate** progress bar
+- [ ] 4 `StatCard`s: Total / New / Contacted / Conversion
+- [ ] Leads table columns: checkbox · Business · Phone · **Email** · Website · Notes · Added · **Status** (right-aligned)
+- [ ] Status badge: portaled inline dropdown to change status
+- [ ] Email + Notes cells open their respective modals; empty cells show "Add email" / "Add note" on row hover
+- [ ] Pagination footer: range text + page-size `Select` (10/25/50/100) + prev/next
+- [ ] Per-campaign `RunHistoryCard`
+- [ ] `BulkActionsBar` when rows selected: Set status · Export · Delete
 
-### Inline status edit (Slice 4.1)
+### Run Campaign modal
 
-- [ ] Status badge is clickable (cursor-pointer)
-- [ ] Dropdown appears in-place, 5 options
-- [ ] On selection: optimistic update + toast
-
-### Notes (Slice 4.2)
-
-- [ ] Notes cell clickable → opens textarea or modal
-- [ ] Save → toast + lead_history row written
+- [ ] Read-only keyword chip
+- [ ] Two `RadioCard`s; "Add new leads only" selected by default
+- [ ] "Replace all leads" shows a red destructive-warning callout
+- [ ] Start scraping = primary button
 
 ### Toasts (all phases)
 
-- [ ] Bottom-right, 16px from edges
-- [ ] Success: `positive-pale` bg, auto-dismiss 3s
-- [ ] Error: white card with `negative` left border, manual dismiss
-- [ ] Warning: `warning`/20 bg, manual dismiss
+- [ ] Bottom-right, stacked, fade-in
+- [ ] Success auto-dismisses after 3s; warning + error are manual; error has a `negative` left border
 
 ### Before phase sign-off
 
-- [ ] All pages match their mockup in `docs/design/screens/` (spacing, colors, radius, typography)
-- [ ] Dark mode works for all components
-- [ ] Focus rings visible on all interactive elements (keyboard navigation)
-- [ ] No hardcoded hex values in components — all Tailwind classes
-- [ ] No custom CSS except `globals.css` baseline
+- [ ] Every page matches the prototype (spacing, colors, radius, typography) in both light and dark
+- [ ] Focus rings visible on all interactive elements
+- [ ] Colors come from Tailwind tokens — no hardcoded hex in components
+- [ ] No custom CSS except the `globals.css` baseline (keyframes, scrollbar, focus ring)

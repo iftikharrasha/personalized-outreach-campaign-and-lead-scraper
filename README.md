@@ -11,8 +11,8 @@ docs/
 ├── PROJECT_PLAN.md              # Master plan — vision, decisions, phases, implementation checklist
 ├── design/
 │   ├── DESIGN_SYSTEM.md         # Colors, typography, spacing, components (Wise-inspired + Tailwind)
-│   ├── DESIGN_SCREENS.md        # Screen-by-screen layout specs and wireframes
-│   └── screens/                 # Exported mockup screenshots from Claude Design
+│   ├── DESIGN_SCREENS.md        # Screen-by-screen specs, routes, and behavior
+│   └── prototype/               # The approved working prototype (the visual contract)
 └── implementation/
     ├── PHASE_0_PREREQUISITES.md
     ├── PHASE_1_FOUNDATION.md
@@ -28,9 +28,11 @@ docs/
 
 **Two layers, in order:**
 
-**Layer 1 — Design.** `DESIGN_SYSTEM.md` and `DESIGN_SCREENS.md` are given to Claude Design to produce high-fidelity mockups. Approved screenshots are saved into `docs/design/screens/`. No code is written yet.
+**Layer 1 — Design (done).** `DESIGN_SYSTEM.md` and `DESIGN_SCREENS.md` were given to Claude Design, which produced a working prototype. The prototype lives in `docs/design/prototype/` (open `index.html` in a browser to see it) and is the **visual contract** — when the design docs and the prototype disagree, the prototype wins.
 
-**Layer 2 — Implementation.** Claude Code reads the design system, references the screens folder for visual targets, and implements each phase in order using the phase docs in `docs/implementation/`.
+**Layer 2 — Implementation (next).** Claude Code reads the design system, references the prototype for the exact look and behavior, and builds the real app phase by phase using the docs in `docs/implementation/`. The prototype is static HTML + React for fidelity only; its components map 1:1 to the shadcn/ui components in the real Next.js build.
+
+> The design pass added two things beyond the original plan: a **Manager dashboard** at `/` and a **`/googlemaps`** route prefix for the scraper. Both are now part of the spec — see `PROJECT_PLAN.md` §3a.
 
 ---
 

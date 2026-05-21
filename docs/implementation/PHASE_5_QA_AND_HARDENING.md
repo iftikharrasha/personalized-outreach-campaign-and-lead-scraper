@@ -75,30 +75,49 @@ Asserts the **entire lifecycle** in one scenario:
 Claude prints this checklist; you go through it and mark each line. Claude updates the doc when you say "QA done."
 
 ```
-[ ] Fresh DB → npm run dev → see empty state
+SHELL & NAVIGATION
+[ ] Fresh DB → npm run dev → shell renders, sidebar + breadcrumb visible
+[ ] Sidebar collapse toggle works; "Coming soon" Yelp/LinkedIn are disabled
+[ ] Dark-mode toggle works and survives a page reload
+[ ] / → Manager dashboard · /googlemaps → list · /googlemaps/[id] → detail
+
+DASHBOARD
+[ ] Manager dashboard renders against an empty DB without errors
+[ ] After scrapes + a CLOSED lead with a raised amount → funnel, earnings, and Winning Leads update
+[ ] Block-cooldown card counts down per second; shows "Clear to run" when no block
+
+CAMPAIGNS
 [ ] Create campaign with each preset (Restaurants, Dentists, Lawyers, Custom)
-[ ] Create campaign with statewide (no city)
+[ ] Create campaign statewide (no city) → keyword preview uses the state
+[ ] Edit campaign → change fields + set a client email → Save (disabled until dirty)
 [ ] Open detail page → all stats are zero
+
+SCRAPING
 [ ] Click Run → modal appears → click Start → toast → banner appears
 [ ] Wait ~30 seconds → leads appear in table
 [ ] Run completes → success toast → stats update
 [ ] Run AGAIN with "Add new leads only" → duplicate counter increases, total stays same
-[ ] Run with "Replace all leads" → confirm dialog → previous leads gone, new set in
-[ ] Change a lead's status → toast → badge updates → reload page → status persisted
+[ ] Run with "Replace all leads" → destructive warning → previous leads gone, new set in
+[ ] Stop a running scrape → banner says "Stopping…" → run shows CANCELLED in history
+[ ] Kill worker mid-scrape (Ctrl+C) → restart worker → orphan run becomes FAILED
+
+LEADS
+[ ] Change a lead's status (portaled dropdown) → toast → reload → status persisted
 [ ] Add a note → check lead_history via psql (one row per change)
-[ ] Search "pizza" → only pizza-named leads visible
+[ ] Add an email via the Email modal → persists; invalid format is rejected
+[ ] Search "pizza" → only matching leads visible (name/phone/email/notes)
 [ ] Filter to CONTACTED → only contacted leads visible
 [ ] Sort by Updated descending → most recently edited first
 [ ] Change page size to 100 → see all on one page
 [ ] Select 5 leads → bulk update to IGNORED → all 5 update
 [ ] Select 3 leads → bulk delete → confirm → gone
-[ ] Export all → CSV downloads → opens in Excel correctly
+[ ] Export all → CSV downloads → opens in Excel correctly (Email column present)
 [ ] Export filtered → CSV contains only filtered rows
-[ ] Stop a running scrape → banner says "Stopping…" → run shows CANCELLED in history
-[ ] Kill worker mid-scrape (Ctrl+C) → restart worker → orphan run becomes FAILED
+
+CAMPAIGN LIFECYCLE
 [ ] Archive campaign → disappears from default list → reappears in Archived tab
 [ ] Restore campaign → reappears in Active
-[ ] Run history collapsible panel shows all past runs with correct stats
+[ ] Per-campaign run history shows past runs; dashboard run history shows all
 ```
 
 ---
@@ -117,20 +136,15 @@ Claude prints this checklist; you go through it and mark each line. Claude updat
 
 ---
 
-### Slice 5.5 — `README.md`
+### Slice 5.5 — `README.md` final pass
 
 **Status:** NOT STARTED
 
-Top-level `README.md` (this is the only `.md` Claude proactively creates outside `docs/`).
+A top-level `README.md` already exists (the operator-facing doc). This slice updates it so it reflects the shipped app:
 
-Sections:
-
-- What it is (1 paragraph)
-- Prerequisites (link to Phase 0)
-- Quick start: `npm install`, `npx prisma migrate dev`, `npm run dev`, `npm run worker`
-- Project structure (link to `docs/PROJECT_PLAN.md`)
-- Development protocol (link to Section 7 of master plan)
-- License placeholder
+- Confirm the project-structure tree, routes (`/`, `/googlemaps`, `/googlemaps/[id]`), and run commands are accurate.
+- Confirm the quick-start works end-to-end: `npm install` → `npx prisma migrate dev` → `npm run dev` + `npm run worker`.
+- Keep it simple and operator-focused — no implementation detail.
 
 ---
 
