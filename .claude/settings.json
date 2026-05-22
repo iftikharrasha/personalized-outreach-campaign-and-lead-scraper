@@ -4,7 +4,8 @@
       "Bash(node -e ' *)",
       "Bash(node scripts/fix-cleanphone.cjs)",
       "Bash(npx tsc *)",
-      "Read(//e/Github/**)"
+      "Read(//e/Github/**)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")"
     ]
   }
 }

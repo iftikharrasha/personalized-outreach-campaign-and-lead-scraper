@@ -1,44 +1,28 @@
 # Lead Scraper
 
-A personal lead operating system. Create campaigns, scrape business data from Google Maps, and manage leads through a clean UI — runs entirely on localhost.
+A personal lead operating system. Create campaigns, scrape business data from
+Google Maps, and manage leads through a clean UI — runs entirely on localhost.
 
 ---
 
-## Project Structure
+## What it does
 
-```
-docs/
-├── PROJECT_PLAN.md              # Master plan — vision, decisions, phases, implementation checklist
-├── design/
-│   ├── DESIGN_SYSTEM.md         # Colors, typography, spacing, components (Wise-inspired + Tailwind)
-│   ├── DESIGN_SCREENS.md        # Screen-by-screen specs, routes, and behavior
-│   └── prototype/               # The approved working prototype (the visual contract)
-└── implementation/
-    ├── PHASE_0_PREREQUISITES.md
-    ├── PHASE_1_FOUNDATION.md
-    ├── PHASE_2_SCRAPER.md
-    ├── PHASE_3_RELIABILITY.md
-    ├── PHASE_4_POLISH.md
-    └── PHASE_5_QA_AND_HARDENING.md
-```
+- **Campaigns** — each campaign is one search keyword tied to a location.
+- **Scraping** — a background worker drives a real browser through Google Maps,
+  extracts business name, phone, website and address, and de-duplicates leads
+  by domain and phone.
+- **Lead management** — inline status edits, notes, manual emails, search,
+  filter, sort, pagination, bulk actions, and CSV export.
+- **Reliability** — block detection, run cancellation, and crash recovery so a
+  scrape survives the real world.
 
 ---
 
-## How This Project Gets Built
+## Quick start
 
-**Two layers, in order:**
+A new machine should be running in well under 30 minutes.
 
-**Layer 1 — Design (done).** `DESIGN_SYSTEM.md` and `DESIGN_SCREENS.md` were given to Claude Design, which produced a working prototype. The prototype lives in `docs/design/prototype/` (open `index.html` in a browser to see it) and is the **visual contract** — when the design docs and the prototype disagree, the prototype wins.
-
-**Layer 2 — Implementation (next).** Claude Code reads the design system, references the prototype for the exact look and behavior, and builds the real app phase by phase using the docs in `docs/implementation/`. The prototype is static HTML + React for fidelity only; its components map 1:1 to the shadcn/ui components in the real Next.js build.
-
-> The design pass added two things beyond the original plan: a **Manager dashboard** at `/` and a **`/googlemaps`** route prefix for the scraper. Both are now part of the spec — see `PROJECT_PLAN.md` §3a.
-
----
-
-## Getting Started
-
-### Prerequisites (do this once)
+### Prerequisites (once)
 
 1. Install **Node.js 20 LTS** — [nodejs.org](https://nodejs.org)
 2. Install **PostgreSQL 15+** — [postgresql.org](https://www.postgresql.org/download/windows)
@@ -46,11 +30,24 @@ docs/
    ```powershell
    createdb -U postgres lead_scraper
    ```
-4. Clone this repo and open it in your editor.
 
-See `docs/implementation/PHASE_0_PREREQUISITES.md` for full details.
+### Setup
 
-### Running the app
+```powershell
+# 1. Install dependencies
+npm install
+
+# 2. Configure the database connection
+#    Copy .env.example to .env and set DATABASE_URL with your postgres password.
+
+# 3. Apply the schema and generate the Prisma client
+npx prisma migrate dev
+
+# 4. Install the browser the scraper drives (once)
+npx playwright install chromium
+```
+
+### Run
 
 ```powershell
 # Terminal 1 — web app
@@ -60,17 +57,53 @@ npm run dev
 npm run worker
 ```
 
-App runs at `http://localhost:3000`.
+Open **http://localhost:3000**.
+
+> The worker must be running for scrapes to execute. The web app queues a
+> scrape; the worker claims and runs it.
 
 ---
 
-## Working with Claude Code
+## Routes
 
-Tell Claude Code which phase or slice to work on:
+| Route               | Page                                                    |
+|---------------------|---------------------------------------------------------|
+| `/`                 | Manager dashboard — funnel, earnings, run history       |
+| `/googlemaps`       | Campaign list — create, run, pause, archive campaigns   |
+| `/googlemaps/[id]`  | Campaign detail — leads table, scrape controls, export  |
 
-- `"go all at once on phase 1"` — implements the whole phase
-- `"do slices 1, 2, 3 in phase 2"` — implements specific slices
-- `"do the next slice"` — picks up where it left off
-- `"status"` — reports what's done, in progress, or blocked
+---
 
-Claude Code will pause and ask you when it needs a database password, a `.env` value, or confirmation before a migration.
+## Project structure
+
+```
+apps/
+├── web/          # Next.js app — UI, API routes, dashboard
+│   ├── app/      #   pages + /api route handlers
+│   ├── components/
+│   └── lib/
+└── scraper/      # Background worker — Playwright + Google Maps extraction
+    └── src/      #   worker loop, google-maps.ts, dedupe.ts, block-detection.ts
+packages/
+└── shared/       # Normalizers shared by web + scraper (domain/phone)
+prisma/
+└── schema.prisma # Campaign, Lead, ScrapeRun, LeadHistory models
+tests/
+├── unit/         # Pure-function tests (normalizers, block detection, dedupe)
+└── integration/  # DB-backed tests (data-flow parity, races, performance)
+docs/             # Project plan, design system, per-phase implementation specs
+```
+
+---
+
+## Commands
+
+| Command            | What it does                                    |
+|--------------------|-------------------------------------------------|
+| `npm run dev`      | Start the Next.js web app                       |
+| `npm run worker`   | Start the background scraper worker             |
+| `npm run test`     | Run the full test suite (unit + integration)    |
+| `npx prisma studio`| Browse the database in a GUI                    |
+
+> Integration tests require a running PostgreSQL database with the schema
+> migrated.

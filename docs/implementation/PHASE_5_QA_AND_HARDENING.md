@@ -2,8 +2,8 @@
 
 > **Goal:** Verify the MVP holds up under real use. Tighten data-flow parity, run the full manual QA checklist, and lock the version.
 
-**Status:** NOT STARTED
-**Last Updated:** –
+**Status:** IN PROGRESS — 5.1/5.2/5.4/5.5 done; 5.3 (manual QA) + 5.6 (sign-off) need the user
+**Last Updated:** 2026-05-22
 
 **Prerequisites:** [Phase 4](./PHASE_4_POLISH.md) completed.
 
@@ -13,12 +13,12 @@
 
 | # | Slice | Status |
 |---|---|---|
-| 5.1 | Data-flow parity test — full lifecycle end-to-end | NOT STARTED |
-| 5.2 | Concurrency / race tests (dedupe under simultaneous inserts) | NOT STARTED |
-| 5.3 | Manual QA checklist run-through | NOT STARTED |
-| 5.4 | Performance pass — leads table with 1000 rows | NOT STARTED |
-| 5.5 | Documentation pass — `README.md` for the repo | NOT STARTED |
-| 5.6 | MVP sign-off | NOT STARTED |
+| 5.1 | Data-flow parity test — full lifecycle end-to-end | COMPLETED |
+| 5.2 | Concurrency / race tests (dedupe under simultaneous inserts) | COMPLETED |
+| 5.3 | Manual QA checklist run-through | NOT STARTED — needs the user |
+| 5.4 | Performance pass — leads table with 1000 rows | COMPLETED |
+| 5.5 | Documentation pass — `README.md` for the repo | COMPLETED |
+| 5.6 | MVP sign-off | NOT STARTED — needs the user |
 
 ---
 
@@ -35,7 +35,7 @@
 
 ### Slice 5.1 — Data-flow parity
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `data-flow.test.ts` › "full lifecycle (Slice 5.1)"
 
 The big test. Lives in `tests/integration/data-flow.test.ts`.
 
@@ -58,7 +58,7 @@ Asserts the **entire lifecycle** in one scenario:
 
 ### Slice 5.2 — Race tests
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `tests/integration/race.test.ts`
 
 - Spin up two workers in-process simultaneously (same DB).
 - Both try to claim the same PENDING job.
@@ -124,7 +124,10 @@ CAMPAIGN LIFECYCLE
 
 ### Slice 5.4 — Performance
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `tests/integration/performance.test.ts`. 1000-lead
+seed: leads-list query, search, and status-filter all well under budget; CSV
+export of 1000 rows under 5 s. No new index needed — the existing
+`leads(campaignId)` and `leads(status)` indexes already cover these queries.
 
 - Seed 1000 leads in one campaign.
 - Verify:
@@ -138,7 +141,9 @@ CAMPAIGN LIFECYCLE
 
 ### Slice 5.5 — `README.md` final pass
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `README.md` rewritten to reflect the shipped app:
+operator-focused quick-start (install → migrate → playwright install → dev +
+worker), accurate routes, project-structure tree, and command reference.
 
 A top-level `README.md` already exists (the operator-facing doc). This slice updates it so it reflects the shipped app:
 

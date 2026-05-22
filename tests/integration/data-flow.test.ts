@@ -286,3 +286,185 @@ describe("outreach lifecycle (Slice 4.12)", () => {
     expect(finalCampaign.totalLeads).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Slice 5.1 — Data-flow parity: the whole MVP lifecycle in one scenario.
+// scrape (50 leads, 10 dupes) → inline status → bulk status → notes →
+// audit-row assertions → search → CSV export → cancel → archive.
+// ---------------------------------------------------------------------------
+
+describe("data-flow parity — full lifecycle (Slice 5.1)", () => {
+  it("runs the whole MVP lifecycle end-to-end and asserts every step", async () => {
+    const { scrapeGoogleMaps } = await import("../../apps/scraper/src/google-maps.js");
+    const { processJob } = await import("../../apps/scraper/src/worker.js");
+
+    // ── Step 1: create the campaign ──────────────────────────────────────
+    const campaign = await db.campaign.create({
+      data: {
+        name:     `${TEST_FLOW_PREFIX}Parity`,
+        keyword:  "parity leads",
+        category: "restaurants",
+        country:  "US",
+        state:    "California",
+        source:   "google_maps",
+        status:   "ACTIVE",
+      },
+    });
+
+    // ── Step 2: scrape — 50 leads, but 10 are exact duplicates of the
+    // first 10, so the dedupe should land 40 and count 10 duplicates. ────
+    const unique: RawLead[] = Array.from({ length: 40 }, (_, i) => ({
+      businessName: `Parity Biz ${i + 1}`,
+      websiteUrl:   `https://parity-biz-${i + 1}.com`,
+      phone:        `555${String(i + 1).padStart(7, "0")}`,
+      address:      `${i + 1} Parity St`,
+    }));
+    const duplicates = unique.slice(0, 10); // same domain+phone → dupes
+    const fiftyLeads = [...unique, ...duplicates];
+
+    vi.mocked(scrapeGoogleMaps).mockImplementationOnce(async (
+      _browser: unknown,
+      _keyword: string,
+      onBatch: (batch: RawLead[]) => Promise<boolean>,
+    ) => { await onBatch(fiftyLeads); });
+
+    const run = await db.scrapeRun.update({
+      where: { id: (await db.scrapeRun.create({
+        data: { campaignId: campaign.id, keywordUsed: campaign.keyword, status: "PENDING" },
+      })).id },
+      data: { status: "RUNNING", startedAt: new Date() },
+    });
+    await processJob(run);
+
+    // ── Step 3: 40 inserted, 10 duplicates, run COMPLETED ────────────────
+    const finalRun = await db.scrapeRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(finalRun.status).toBe("COMPLETED");
+    expect(finalRun.newLeadsCount).toBe(40);
+    expect(finalRun.duplicateCount).toBe(10);
+
+    const leads = await db.lead.findMany({
+      where:   { campaignId: campaign.id },
+      orderBy: { businessName: "asc" },
+    });
+    expect(leads).toHaveLength(40);
+
+    const statusRoute = await import("../../apps/web/app/api/leads/[id]/status/route.js");
+    const notesRoute  = await import("../../apps/web/app/api/leads/[id]/notes/route.js");
+    const bulkStatusRoute = await import("../../apps/web/app/api/leads/bulk-status/route.js");
+
+    // ── Step 4: inline-edit 5 leads to CONTACTED (one by one) ────────────
+    const firstFive = leads.slice(0, 5);
+    for (const lead of firstFive) {
+      await statusRoute.PUT(
+        req(`/api/leads/${lead.id}/status`, { method: "PUT", body: { status: "CONTACTED" } }),
+        { params: Promise.resolve({ id: lead.id }) },
+      );
+    }
+
+    // ── Step 5: move 3 of those to REPLIED ───────────────────────────────
+    const threeReplied = firstFive.slice(0, 3);
+    for (const lead of threeReplied) {
+      await statusRoute.PUT(
+        req(`/api/leads/${lead.id}/status`, { method: "PUT", body: { status: "REPLIED" } }),
+        { params: Promise.resolve({ id: lead.id }) },
+      );
+    }
+
+    // ── Step 6: bulk-update 10 other leads to IGNORED ────────────────────
+    const tenIgnored = leads.slice(5, 15);
+    await bulkStatusRoute.PUT(
+      req(`/api/leads/bulk-status`, {
+        method: "PUT",
+        body:   { ids: tenIgnored.map((l) => l.id), status: "IGNORED" },
+      }),
+    );
+
+    // ── Step 7: add notes to 2 leads ─────────────────────────────────────
+    const twoNoted = leads.slice(15, 17);
+    for (const lead of twoNoted) {
+      await notesRoute.PUT(
+        req(`/api/leads/${lead.id}/notes`, { method: "PUT", body: { notes: `note for ${lead.businessName}` } }),
+        { params: Promise.resolve({ id: lead.id }) },
+      );
+    }
+
+    // ── Step 8: lead_history holds exactly the expected rows ─────────────
+    const allHistory = await db.leadHistory.findMany({
+      where: { lead: { campaignId: campaign.id } },
+    });
+    // Status changes: 5 (→CONTACTED) + 3 (→REPLIED) + 10 (→IGNORED) = 18
+    const statusRows = allHistory.filter((h) => h.newStatus !== null);
+    expect(statusRows).toHaveLength(18);
+    expect(statusRows.filter((h) => h.newStatus === "CONTACTED")).toHaveLength(5);
+    expect(statusRows.filter((h) => h.newStatus === "REPLIED")).toHaveLength(3);
+    expect(statusRows.filter((h) => h.newStatus === "IGNORED")).toHaveLength(10);
+    // Note changes: 2 rows, each with note text and null statuses
+    const noteRows = allHistory.filter((h) => h.note !== null && h.newStatus === null);
+    expect(noteRows).toHaveLength(2);
+
+    // ── Step 9: search returns the right subset ──────────────────────────
+    const leadsRoute = await import("../../apps/web/app/api/campaigns/[id]/leads/route.js");
+    // "Parity Biz 1" matches "Parity Biz 1", "...10".."...19" → 11 leads
+    const searchRes = await leadsRoute.GET(
+      req(`/api/campaigns/${campaign.id}/leads?q=${encodeURIComponent("Parity Biz 1")}`),
+      { params: Promise.resolve({ id: campaign.id }) },
+    );
+    const searchLeads = await searchRes.json() as unknown[];
+    expect(searchLeads).toHaveLength(11);
+
+    // ── Step 10: export filtered (status=IGNORED) to CSV ─────────────────
+    const exportRoute = await import("../../apps/web/app/api/campaigns/[id]/export/route.js");
+    const exportRes = await exportRoute.GET(
+      req(`/api/campaigns/${campaign.id}/export?scope=filtered&status=IGNORED`),
+      { params: Promise.resolve({ id: campaign.id }) },
+    );
+    expect(exportRes.headers.get("Content-Type")).toContain("text/csv");
+    const csv = await exportRes.text();
+    const csvLines = csv.trim().split("\r\n");
+    expect(csvLines[0]).toContain("Business Name");
+    expect(csvLines).toHaveLength(11); // header + 10 IGNORED leads
+
+    // ── Step 11: cancel a fresh scrape mid-flight ────────────────────────
+    const cancelRun = await db.scrapeRun.update({
+      where: { id: (await db.scrapeRun.create({
+        data: { campaignId: campaign.id, keywordUsed: campaign.keyword, status: "PENDING" },
+      })).id },
+      data: { status: "RUNNING", startedAt: new Date() },
+    });
+    vi.mocked(scrapeGoogleMaps).mockImplementationOnce(async (
+      _browser: unknown,
+      _keyword: string,
+      onBatch: (batch: RawLead[]) => Promise<boolean>,
+    ) => {
+      // First partial batch lands, then the user cancels.
+      await onBatch([
+        { businessName: "Cancel Biz A", websiteUrl: "https://cancel-a.com", phone: "5559990001", address: "A" },
+        { businessName: "Cancel Biz B", websiteUrl: "https://cancel-b.com", phone: "5559990002", address: "B" },
+      ]);
+      await db.scrapeRun.update({ where: { id: cancelRun.id }, data: { status: "CANCELLED", finishedAt: new Date() } });
+      await new Promise((r) => setTimeout(r, 3100)); // pass the 3 s cancel-check throttle
+      await onBatch([
+        { businessName: "Cancel Biz C", websiteUrl: "https://cancel-c.com", phone: "5559990003", address: "C" },
+      ]);
+    });
+    await processJob(cancelRun);
+
+    const cancelledRun = await db.scrapeRun.findUniqueOrThrow({ where: { id: cancelRun.id } });
+    expect(cancelledRun.status).toBe("CANCELLED");
+    // Partial leads from the first batch survived the cancel.
+    const cancelLeads = await db.lead.count({ where: { campaignId: campaign.id, businessName: { startsWith: "Cancel Biz" } } });
+    expect(cancelLeads).toBeGreaterThanOrEqual(2);
+
+    // ── Step 12: archive the campaign → drops out of the default list ────
+    const campaignRoute = await import("../../apps/web/app/api/campaigns/[id]/route.js");
+    await campaignRoute.PUT(
+      req(`/api/campaigns/${campaign.id}`, { method: "PUT", body: { status: "ARCHIVED" } }),
+      { params: Promise.resolve({ id: campaign.id }) },
+    );
+    const archived = await db.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
+    expect(archived.status).toBe("ARCHIVED");
+    // Default list view = ACTIVE campaigns only.
+    const activeOnly = await db.campaign.findMany({ where: { status: "ACTIVE", name: { startsWith: TEST_FLOW_PREFIX } } });
+    expect(activeOnly.find((c) => c.id === campaign.id)).toBeUndefined();
+  });
+});
