@@ -2,8 +2,8 @@
 
 > **Goal:** Make the leads table usable for real outreach. Inline status edits, notes with audit trail, search + filter, bulk operations, CSV export, toasts everywhere.
 
-**Status:** NOT STARTED
-**Last Updated:** –
+**Status:** COMPLETED
+**Last Updated:** 2026-05-22
 
 **Prerequisites:** [Phase 3](./PHASE_3_RELIABILITY.md) completed.
 
@@ -13,18 +13,18 @@
 
 | # | Slice | Status |
 |---|---|---|
-| 4.1 | Inline status edit (click badge → portaled dropdown → persist + toast) | NOT STARTED |
-| 4.2 | Notes column — `NotesModal` + `lead_history` audit row | NOT STARTED |
-| 4.3 | Email column — `EmailModal` (manual email entry + validation) | NOT STARTED |
-| 4.4 | Search input (name / phone / email / notes, debounced) | NOT STARTED |
-| 4.5 | Status filter dropdown + URL persistence | NOT STARTED |
-| 4.6 | Sortable columns (Name, Status, Updated) | NOT STARTED |
-| 4.7 | Pagination (10 / 25 / 50 / 100 per page) | NOT STARTED |
-| 4.8 | Bulk selection (checkbox column + select-all) | NOT STARTED |
-| 4.9 | Bulk status update + bulk delete (with confirm) | NOT STARTED |
-| 4.10 | CSV export (all / filtered / selected) | NOT STARTED |
-| 4.11 | Stats row live counts (Total / New / Contacted / Conversion) | NOT STARTED |
-| 4.12 | Tests for status transitions, audit trail, bulk ops, export | NOT STARTED |
+| 4.1 | Inline status edit (click badge → portaled dropdown → persist + toast) | COMPLETED |
+| 4.2 | Notes column — `NotesModal` + `lead_history` audit row | COMPLETED |
+| 4.3 | Email column — `EmailModal` (manual email entry + validation) | COMPLETED |
+| 4.4 | Search input (name / phone / email / notes, debounced) | COMPLETED |
+| 4.5 | Status filter dropdown + URL persistence | COMPLETED |
+| 4.6 | Sortable columns (Name, Status, Updated) | COMPLETED |
+| 4.7 | Pagination (10 / 25 / 50 / 100 per page) | COMPLETED |
+| 4.8 | Bulk selection (checkbox column + select-all) | COMPLETED |
+| 4.9 | Bulk status update + bulk delete (with confirm) | COMPLETED |
+| 4.10 | CSV export (all / filtered / selected) | COMPLETED |
+| 4.11 | Stats row live counts (Total / New / Contacted / Conversion) | COMPLETED |
+| 4.12 | Tests for status transitions, audit trail, bulk ops, export | COMPLETED |
 
 > **Numbering note:** the Email-modal slice (4.3) was inserted after the design pass added a manual email field. Slices 4.4–4.12 here correspond to the original 4.3–4.11.
 
@@ -40,7 +40,7 @@ Nothing new — this phase is purely web work. No env changes, no manual install
 
 ### Slice 4.1 — Inline status edit
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 Reference: `prototype/screens-detail.jsx` (`LeadRow` status dropdown).
 
@@ -56,7 +56,7 @@ Reference: `prototype/screens-detail.jsx` (`LeadRow` status dropdown).
 
 ### Slice 4.2 — Notes + audit
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 Reference: `prototype/screens-detail.jsx` (`NotesModal`).
 
@@ -71,7 +71,7 @@ Reference: `prototype/screens-detail.jsx` (`NotesModal`).
 
 ### Slice 4.3 — Email (manual entry)
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
@@ -87,7 +87,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.4 — Search
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - Input above the leads table, placeholder "Search by name, phone, notes…".
 - Debounced 300 ms.
@@ -100,7 +100,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.5 — Status filter
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - Select above table: All / NEW / CONTACTED / REPLIED / IGNORED / CLOSED.
 - Persists to URL (`?status=CONTACTED`).
@@ -112,7 +112,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.6 — Sortable columns
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - Clickable headers for Name, Status, Updated.
 - URL params: `sort=name&dir=asc`.
@@ -124,7 +124,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.7 — Pagination
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - Footer: page size select (10/25/50/100), prev/next, current range ("Showing 1–25 of 142"), "Page N of M".
 - URL params: `page=2&pageSize=50`.
@@ -135,7 +135,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.8 — Bulk selection
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - Checkbox column.
 - Header checkbox = select all on current page (indeterminate if mixed).
@@ -148,7 +148,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.9 — Bulk operations
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - The `BulkActionsBar` shows: `Set status` (menu), `Export`, `Delete`.
 - `PUT /api/leads/bulk-status` accepts `{ ids: string[], status: LeadStatus }`. Writes lead_history rows for each.
@@ -160,7 +160,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.10 — CSV export
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - `GET /api/campaigns/[id]/export?scope=all|filtered|selected&ids=...&filters=...`
 - Streams CSV with columns: Business Name, Phone, Email, Website, Normalized Domain, Status, Notes, Address, Created At, Last Updated.
@@ -172,7 +172,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.11 — Stats live counts
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - The 4 stat cards on the campaign detail page get real data:
   - Total Leads
@@ -187,7 +187,7 @@ Reference: `prototype/screens-detail.jsx` (`EmailModal`).
 
 ### Slice 4.12 — Polish tests
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - Combine all of the above into the `data-flow.test.ts` parity suite.
 - Add one big scenario test: "outreach lifecycle" — create campaign, scrape (mocked), change statuses, add notes, add an email, search, filter, bulk delete, export. Assert every step's effect.

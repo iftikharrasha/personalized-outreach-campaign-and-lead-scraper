@@ -30,7 +30,12 @@ export default defineConfig({
           fileParallelism: false,
         },
         resolve: {
-          alias: { "@shared": resolve(__dirname, "packages/shared/src") },
+          alias: {
+            "@shared": resolve(__dirname, "packages/shared/src"),
+            // "@/" is the web app's path alias — needed when integration tests
+            // import Next.js route handlers (Slice 4.12 outreach lifecycle).
+            "@/": resolve(__dirname, "apps/web") + "/",
+          },
         },
       },
     ],

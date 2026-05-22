@@ -11,6 +11,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { Tabs } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import type { Campaign } from "@prisma/client";
+type CampaignWithStats = Campaign & { contactedLeads: number };
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, History, Loader2, MapPin, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -61,7 +62,7 @@ function formatRunLabel(run: { status: string; newLeadsCount: number; finishedAt
   return <span>{run.newLeadsCount} leads · {timeAgo}</span>;
 }
 
-function CampaignCard({ c, onEdit, onRefetch }: { c: Campaign; onEdit: (c: Campaign) => void; onRefetch: () => void }) {
+function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: (c: CampaignWithStats) => void; onRefetch: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const isArchived = c.status === "ARCHIVED";
@@ -183,17 +184,24 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: Campaign; onEdit: (c: Campa
             <div className="text-[11px] text-mute mt-1 uppercase tracking-wide">Leads</div>
           </div>
           <div>
-            <div className="text-[26px] font-bold leading-none text-ink dark:text-d-ink tabular-nums">0</div>
+            <div className="text-[26px] font-bold leading-none text-ink dark:text-d-ink tabular-nums">{c.contactedLeads}</div>
             <div className="text-[11px] text-mute mt-1 uppercase tracking-wide">Contacted</div>
           </div>
         </div>
 
         <div>
-          <Progress value={0} />
-          <div className="mt-2 flex items-center justify-between text-[12px]">
-            <span className="text-mute">Outreach progress</span>
-            <span className="font-semibold text-ink dark:text-d-ink">0%</span>
-          </div>
+          {(() => {
+            const pct = c.totalLeads > 0 ? Math.round((c.contactedLeads / c.totalLeads) * 100) : 0;
+            return (
+              <>
+                <Progress value={pct} />
+                <div className="mt-2 flex items-center justify-between text-[12px]">
+                  <span className="text-mute">Outreach progress</span>
+                  <span className="font-semibold text-ink dark:text-d-ink">{pct}%</span>
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         <div className="text-[12px] text-mute flex items-center gap-1.5">
@@ -263,7 +271,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 
 export default function CampaignListPage() {
   const qc = useQueryClient();
-  const { data: campaigns = [], isLoading } = useQuery<Campaign[]>({
+  const { data: campaigns = [], isLoading } = useQuery<CampaignWithStats[]>({
     queryKey: ["campaigns"],
     queryFn: () => fetch("/api/campaigns").then((r) => r.json()),
   });
@@ -271,7 +279,7 @@ export default function CampaignListPage() {
   const [search, setSearch] = React.useState("");
   const [tab, setTab] = React.useState("all");
   const [createOpen, setCreateOpen] = React.useState(false);
-  const [editingCampaign, setEditingCampaign] = React.useState<Campaign | null>(null);
+  const [editingCampaign, setEditingCampaign] = React.useState<CampaignWithStats | null>(null);
 
   const refetch = () => qc.invalidateQueries({ queryKey: ["campaigns"] });
 

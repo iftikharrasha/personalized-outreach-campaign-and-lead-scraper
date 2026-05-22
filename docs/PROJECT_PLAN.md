@@ -169,9 +169,9 @@ project-root/
 |---|---|---|---|---|
 | 0 | [implementation/PHASE_0_PREREQUISITES.md](./implementation/PHASE_0_PREREQUISITES.md) | Local environment ready (Node, PostgreSQL, Playwright browsers) | IN PROGRESS — only PostgreSQL install left | 2026-05-21 |
 | 1 | [implementation/PHASE_1_FOUNDATION.md](./implementation/PHASE_1_FOUNDATION.md) | Schema migrated; campaigns CRUD UI works; project boots | IN PROGRESS — 1.1/1.2/1.3/1.5 done, 1.4 blocked | 2026-05-21 |
-| 2 | [implementation/PHASE_2_SCRAPER.md](./implementation/PHASE_2_SCRAPER.md) | Worker scrapes Google Maps end-to-end and writes leads | NOT STARTED | – |
-| 3 | [implementation/PHASE_3_RELIABILITY.md](./implementation/PHASE_3_RELIABILITY.md) | Block detection, smart waits, run cancel, polling | NOT STARTED | – |
-| 4 | [implementation/PHASE_4_POLISH.md](./implementation/PHASE_4_POLISH.md) | Bulk actions, search/filter, notes, CSV export, toasts | NOT STARTED | – |
+| 2 | [implementation/PHASE_2_SCRAPER.md](./implementation/PHASE_2_SCRAPER.md) | Worker scrapes Google Maps end-to-end and writes leads | COMPLETED | 2026-05-22 |
+| 3 | [implementation/PHASE_3_RELIABILITY.md](./implementation/PHASE_3_RELIABILITY.md) | Block detection, smart waits, run cancel, polling | COMPLETED | 2026-05-22 |
+| 4 | [implementation/PHASE_4_POLISH.md](./implementation/PHASE_4_POLISH.md) | Bulk actions, search/filter, notes, CSV export, toasts | COMPLETED | 2026-05-22 |
 | 5 | [implementation/PHASE_5_QA_AND_HARDENING.md](./implementation/PHASE_5_QA_AND_HARDENING.md) | Data-flow parity tests pass; MVP DoD met | NOT STARTED | – |
 
 **Status values:** `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `COMPLETED`. Claude updates this table after finishing each phase. Within each phase doc, individual slices have their own status.

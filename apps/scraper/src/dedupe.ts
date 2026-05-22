@@ -1,4 +1,4 @@
-import type { ScrapeRun } from "@prisma/client";
+import type { Prisma, ScrapeRun } from "@prisma/client";
 import { normalizeDomain, normalizePhone, normalizeBusinessName } from "../../../packages/shared/src/index.js";
 import { db } from "./db.js";
 import { logger } from "./logger.js";
@@ -24,8 +24,9 @@ interface PreparedLead {
 // Each scroll's new leads are immediately deduped and flushed to the DB.
 // Returns true from the callback to signal the scraper to stop (cancellation).
 export function createBatchProcessor(job: ScrapeRun): {
-  onBatch: (batch: RawLead[]) => Promise<boolean>;
-  finish:  () => Promise<void>;
+  onBatch:      (batch: RawLead[]) => Promise<boolean>;
+  finish:       () => Promise<void>;
+  wasCancelled: () => boolean;
 } {
   // In-memory seen sets — loaded once before first batch, updated as leads are inserted
   const existingDomains = new Set<string>();
@@ -34,6 +35,10 @@ export function createBatchProcessor(job: ScrapeRun): {
 
   let totalNew  = 0;
   let totalDupe = 0;
+  // Throttle the cancellation DB check — leads now flush one at a time, so
+  // querying the run status on every lead would add a round-trip per lead.
+  let lastCancelCheck = 0;
+  let cancelled = false;
 
   async function loadSeenSets() {
     const existing = await db.lead.findMany({
@@ -91,9 +96,23 @@ export function createBatchProcessor(job: ScrapeRun): {
       totalDupe += batchDupes;
     }
 
-    // Check for cancellation after flush
-    const current = await db.scrapeRun.findUnique({ where: { id: job.id }, select: { status: true } });
-    return current?.status === "CANCELLED";
+    // Check for cancellation — throttled to once every 3 s so single-lead
+    // flushes don't trigger a DB round-trip on every extracted lead.
+    const now = Date.now();
+    if (now - lastCancelCheck >= 3000) {
+      lastCancelCheck = now;
+      const current = await db.scrapeRun.findUnique({
+        where:  { id: job.id },
+        select: { status: true },
+      });
+      if (current?.status === "CANCELLED") cancelled = true;
+    }
+    return cancelled;
+  }
+
+  // Exposed so the worker can tell a clean cancel from a normal completion.
+  function wasCancelled(): boolean {
+    return cancelled;
   }
 
   async function finish() {
@@ -107,7 +126,7 @@ export function createBatchProcessor(job: ScrapeRun): {
     logger.info("dedupe complete", { runId: job.id, totalNew, totalDupe });
   }
 
-  return { onBatch, finish };
+  return { onBatch, finish, wasCancelled };
 }
 
 async function flushBatch(
@@ -120,7 +139,9 @@ async function flushBatch(
   let inserted = 0;
 
   try {
-    const ops: Parameters<typeof db.$transaction>[0] = [];
+    // $transaction is overloaded (array form vs callback form); type the
+    // operation list explicitly so TS resolves the array (batched) form.
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
 
     if (batch.length > 0) {
       ops.push(db.lead.createMany({ data: batch, skipDuplicates: true }));

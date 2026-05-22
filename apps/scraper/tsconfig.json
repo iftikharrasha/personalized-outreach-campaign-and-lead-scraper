@@ -4,8 +4,11 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ES2022",
+    // DOM lib is required because Playwright page.evaluate / waitForFunction
+    // callbacks run in the browser and reference document, HTMLElement, etc.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
     "outDir": "dist",
-    "rootDir": "src",
     "paths": {
       "@shared/*": ["../../packages/shared/src/*"]
     }

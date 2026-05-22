@@ -1,12 +1,14 @@
 import { db } from "./db.js";
 import { logger } from "./logger.js";
-import { runWorkerLoop } from "./worker.js";
+import { reapOrphanRuns, runWorkerLoop } from "./worker.js";
 
 async function main() {
   logger.info("worker ready");
 
   await db.$connect();
   logger.info("database connected");
+
+  await reapOrphanRuns();
 
   await runWorkerLoop();
 }

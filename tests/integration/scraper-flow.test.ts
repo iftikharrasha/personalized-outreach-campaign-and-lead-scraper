@@ -205,4 +205,132 @@ describe("worker processJob end-to-end (Slice 2.9)", () => {
     expect(finalRun.errorMessage).toContain("selector timeout");
     expect(finalRun.finishedAt).not.toBeNull();
   });
+
+  it("marks a job FAILED with block message when scraper throws BlockedError", async () => {
+    const { scrapeGoogleMaps } = await import("../../apps/scraper/src/google-maps.js");
+    const { BlockedError } = await import("../../apps/scraper/src/block-detection.js");
+    vi.mocked(scrapeGoogleMaps).mockRejectedValueOnce(new BlockedError("CAPTCHA", "hard"));
+
+    const campaign = await db.campaign.create({
+      data: {
+        name:     `${TEST_PREFIX}Block Test`,
+        keyword:  "blocked query",
+        category: "restaurants",
+        country:  "US",
+        state:    "California",
+        source:   "google_maps",
+        status:   "ACTIVE",
+      },
+    });
+
+    const job = await db.scrapeRun.create({
+      data: { campaignId: campaign.id, keywordUsed: "blocked query", status: "RUNNING", startedAt: new Date() },
+    });
+
+    const { processJob } = await import("../../apps/scraper/src/worker.js");
+    await processJob(job);
+
+    const finalRun = await db.scrapeRun.findUniqueOrThrow({ where: { id: job.id } });
+    expect(finalRun.status).toBe("FAILED");
+    expect(finalRun.errorMessage).toContain("CAPTCHA");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice 3.5 — Orphan run reaper
+// ---------------------------------------------------------------------------
+
+describe("reapOrphanRuns (Slice 3.5)", () => {
+  it("marks all RUNNING runs as FAILED on worker restart", async () => {
+    const campaign = await db.campaign.create({
+      data: {
+        name:     `${TEST_PREFIX}Orphan Test`,
+        keyword:  "orphan query",
+        category: "restaurants",
+        country:  "US",
+        state:    "California",
+        source:   "google_maps",
+        status:   "ACTIVE",
+      },
+    });
+
+    // Simulate two runs left stuck at RUNNING (worker crashed)
+    const run1 = await db.scrapeRun.create({
+      data: { campaignId: campaign.id, keywordUsed: "orphan query", status: "RUNNING", startedAt: new Date() },
+    });
+    const run2 = await db.scrapeRun.create({
+      data: { campaignId: campaign.id, keywordUsed: "orphan query", status: "RUNNING", startedAt: new Date() },
+    });
+
+    const { reapOrphanRuns } = await import("../../apps/scraper/src/worker.js");
+    await reapOrphanRuns();
+
+    const [r1, r2] = await Promise.all([
+      db.scrapeRun.findUniqueOrThrow({ where: { id: run1.id } }),
+      db.scrapeRun.findUniqueOrThrow({ where: { id: run2.id } }),
+    ]);
+    expect(r1.status).toBe("FAILED");
+    expect(r1.errorMessage).toContain("crashed");
+    expect(r2.status).toBe("FAILED");
+    expect(r2.finishedAt).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice 3.6 — Cancellation: partial leads preserved
+// ---------------------------------------------------------------------------
+
+describe("cancellation preserves partial leads (Slice 3.6)", () => {
+  it("stops mid-scrape and keeps already-flushed leads", async () => {
+    const { scrapeGoogleMaps } = await import("../../apps/scraper/src/google-maps.js");
+
+    const campaign = await db.campaign.create({
+      data: {
+        name:     `${TEST_PREFIX}Cancel Test`,
+        keyword:  "cancel query",
+        category: "restaurants",
+        country:  "US",
+        state:    "California",
+        source:   "google_maps",
+        status:   "ACTIVE",
+      },
+    });
+
+    const pendingRun = await db.scrapeRun.create({
+      data: { campaignId: campaign.id, keywordUsed: "cancel query", status: "PENDING" },
+    });
+    const job = await db.scrapeRun.update({
+      where: { id: pendingRun.id },
+      data:  { status: "RUNNING", startedAt: new Date() },
+    });
+
+    // Scraper sends first batch then simulates user pressing Stop mid-way.
+    // The dedupe cancellation check is throttled to once per 3 s, so we wait
+    // past that window before the second batch to guarantee it re-checks.
+    vi.mocked(scrapeGoogleMaps).mockImplementationOnce(async (
+      _browser: unknown,
+      _keyword: string,
+      onBatch: (batch: RawLead[]) => Promise<boolean>,
+    ) => {
+      // Send first batch of 3 leads
+      await onBatch(buildRawLeads(3, "Cancel"));
+      // Simulate the DB being marked CANCELLED before next batch
+      await db.scrapeRun.update({ where: { id: job.id }, data: { status: "CANCELLED", finishedAt: new Date() } });
+      // Wait past the 3 s cancellation-check throttle window
+      await new Promise((r) => setTimeout(r, 3100));
+      // Send second batch — onBatch should now re-check and return true (stop)
+      await onBatch(buildRawLeads(3, "CancelB"));
+    });
+
+    const { processJob } = await import("../../apps/scraper/src/worker.js");
+    await processJob(job);
+
+    // Partial leads from first batch should be in DB
+    const leads = await db.lead.findMany({ where: { campaignId: campaign.id } });
+    expect(leads.length).toBeGreaterThanOrEqual(3);
+
+    // Run should be CANCELLED (not FAILED)
+    const finalRun = await db.scrapeRun.findUniqueOrThrow({ where: { id: job.id } });
+    expect(finalRun.status).toBe("CANCELLED");
+  });
 });

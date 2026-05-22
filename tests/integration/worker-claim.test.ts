@@ -31,8 +31,12 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  // Clean up any runs from previous test iterations
+  // claimNextJob below issues a GLOBAL `UPDATE scrape_runs` (it mirrors the
+  // real worker, which claims the oldest PENDING run across the whole DB).
+  // So this test only behaves deterministically if NO other PENDING run
+  // exists. Drain every stray PENDING run, plus this test's own runs.
   await db.scrapeRun.deleteMany({ where: { campaignId } });
+  await db.scrapeRun.deleteMany({ where: { status: "PENDING" } });
 });
 
 async function claimNextJob() {

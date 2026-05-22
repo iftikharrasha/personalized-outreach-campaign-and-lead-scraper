@@ -6,7 +6,26 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const campaign = await db.campaign.findUnique({ where: { id } });
   if (!campaign) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(campaign);
+
+  // Slice 4.11 — live stat counts computed in the DB so they always match.
+  const grouped = await db.lead.groupBy({
+    by:    ["status"],
+    where: { campaignId: id },
+    _count: { _all: true },
+  });
+  const byStatus: Record<string, number> = {};
+  for (const g of grouped) byStatus[g.status] = g._count._all;
+
+  const total     = Object.values(byStatus).reduce((s, n) => s + n, 0);
+  const newCount  = byStatus["NEW"] ?? 0;
+  const contacted = (byStatus["CONTACTED"] ?? 0) + (byStatus["REPLIED"] ?? 0) + (byStatus["CLOSED"] ?? 0);
+  const replied   = (byStatus["REPLIED"] ?? 0) + (byStatus["CLOSED"] ?? 0);
+  const conversion = total > 0 ? Math.round((replied / total) * 100) : 0;
+
+  return NextResponse.json({
+    ...campaign,
+    stats: { total, new: newCount, contacted, conversion },
+  });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

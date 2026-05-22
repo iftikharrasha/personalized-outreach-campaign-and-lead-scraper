@@ -1,6 +1,8 @@
 "use client";
 import { EditCampaignModal } from "@/components/campaigns/edit-campaign-modal";
 import { RunCampaignModal } from "@/components/campaigns/run-campaign-modal";
+import { EmailModal } from "@/components/leads/email-modal";
+import { NotesModal } from "@/components/leads/notes-modal";
 import { Badge } from "@/components/ui/badge";
 import { BulkActionsBar } from "@/components/ui/bulk-actions-bar";
 import { Button } from "@/components/ui/button";
@@ -8,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Menu } from "@/components/ui/menu";
+import { Modal } from "@/components/ui/modal";
 import { RunHistoryCard } from "@/components/ui/run-history-card";
 import type { RunEntry } from "@/components/ui/run-history-card";
 import { Select } from "@/components/ui/select";
@@ -16,17 +19,44 @@ import { useToast } from "@/components/ui/toast";
 import { STATUS_OPTIONS } from "@/lib/constants";
 import type { Campaign, Lead, ScrapeRun } from "@prisma/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Check, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Loader2, Mail, MapPin, Pencil, Phone, Play, Square, User, X } from "lucide-react";
+import { Archive, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Loader2, Mail, MapPin, Pencil, Phone, Play, Sparkles, Square, Trash2, User } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { use } from "react";
+import { use, Suspense } from "react";
 
 const badgeTone = (status: string) => {
   const opt = STATUS_OPTIONS.find((s) => s.value === status);
   return (opt?.tone ?? "neutral") as "neutral" | "warning" | "positive" | "mute" | "purple";
 };
+
+// Slice 4.6 — a clickable, sortable table header cell.
+function SortHeader({
+  label, sortKey, activeSort, activeDir, onSort, align = "left",
+}: {
+  label: string;
+  sortKey: string;
+  activeSort: string;
+  activeDir: "asc" | "desc";
+  onSort: (key: string) => void;
+  align?: "left" | "right";
+}) {
+  const isActive = activeSort === sortKey;
+  return (
+    <button
+      onClick={() => onSort(sortKey)}
+      className={`inline-flex items-center gap-1 hover:text-ink dark:hover:text-d-ink transition-colors ${
+        isActive ? "text-ink dark:text-d-ink" : ""
+      } ${align === "right" ? "flex-row-reverse" : ""}`}
+    >
+      {label}
+      {isActive
+        ? activeDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+        : <ArrowUpDown size={12} className="opacity-40" />}
+    </button>
+  );
+}
 
 interface RunStatus {
   id:             string;
@@ -38,12 +68,23 @@ interface RunStatus {
   errorMessage:   string | null;
 }
 
+// Slice 4.11 — GET /api/campaigns/[id] now returns live stats alongside the campaign.
+interface LeadStats {
+  total:      number;
+  new:        number;
+  contacted:  number;
+  conversion: number;
+}
+type CampaignWithStats = Campaign & { stats: LeadStats };
+
 function LeadRow({
-  lead, selected, onToggle, onStatusChange,
+  lead, selected, onToggle, onStatusChange, onEditNotes, onEditEmail,
 }: {
   lead: Lead; selected: boolean;
   onToggle: (on: boolean) => void;
   onStatusChange: (status: string) => void;
+  onEditNotes: () => void;
+  onEditEmail: () => void;
 }) {
   const [statusOpen, setStatusOpen] = React.useState(false);
   const [coords, setCoords] = React.useState<{ top: number; left: number } | null>(null);
@@ -92,11 +133,19 @@ function LeadRow({
       </td>
       <td className="py-3.5 px-3 max-w-[200px]">
         {lead.email ? (
-          <span className="inline-flex items-center gap-1.5 text-body dark:text-d-body truncate max-w-[180px]">
+          <button
+            onClick={onEditEmail}
+            className="inline-flex items-center gap-1.5 text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink truncate max-w-[180px]"
+          >
             <Mail size={12} className="text-mute shrink-0" /><span className="truncate">{lead.email}</span>
-          </span>
+          </button>
         ) : (
-          <span className="text-mute text-[13px] inline-flex items-center gap-1 opacity-70"><Mail size={12} /> —</span>
+          <button
+            onClick={onEditEmail}
+            className="text-mute text-[13px] inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 hover:text-ink dark:hover:text-d-ink transition-opacity"
+          >
+            <Mail size={12} /> Add email
+          </button>
         )}
       </td>
       <td className="py-3.5 px-3">
@@ -107,7 +156,21 @@ function LeadRow({
         ) : <span className="text-mute">—</span>}
       </td>
       <td className="py-3.5 px-3 max-w-[260px]">
-        <span className="text-[13px] text-body dark:text-d-body line-clamp-1 max-w-[240px]">{lead.notes ?? <span className="text-mute">—</span>}</span>
+        {lead.notes ? (
+          <button
+            onClick={onEditNotes}
+            className="text-[13px] text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink line-clamp-1 max-w-[240px] text-left"
+          >
+            {lead.notes}
+          </button>
+        ) : (
+          <button
+            onClick={onEditNotes}
+            className="text-[13px] text-mute inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 hover:text-ink dark:hover:text-d-ink transition-opacity"
+          >
+            <Pencil size={11} /> Add note
+          </button>
+        )}
       </td>
       <td className="py-3.5 px-3 text-[12px] text-mute">{addedAt}</td>
       <td className="py-3.5 px-3 pr-5 text-right">
@@ -139,6 +202,37 @@ function LeadRow({
   );
 }
 
+// A plain stopwatch. It starts the moment `running` flips true, ticks every
+// second, and freezes when `running` flips false. The start time lives in a
+// ref so it survives every re-render (polling, lead inserts) untouched — the
+// timer is purely a clock, with no link to leads or the scrape itself.
+// Returns the elapsed time formatted as "M:SS".
+function useStopwatch(running: boolean): string {
+  const startRef = React.useRef<number | null>(null);
+  const [elapsedSec, setElapsedSec] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!running) {
+      startRef.current = null;
+      setElapsedSec(0);
+      return;
+    }
+    // Run just started — capture the baseline once.
+    startRef.current = Date.now();
+    setElapsedSec(0);
+    const t = setInterval(() => {
+      if (startRef.current != null) {
+        setElapsedSec(Math.floor((Date.now() - startRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [running]);
+
+  const mins = Math.floor(elapsedSec / 60);
+  const secs = elapsedSec % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
 function ScrapingBanner({ run }: { run: RunStatus }) {
   const isActive = run.status === "PENDING" || run.status === "RUNNING";
   const isFailed = run.status === "FAILED";
@@ -146,20 +240,56 @@ function ScrapingBanner({ run }: { run: RunStatus }) {
 
   if (!isActive && !isFailed && !isCancelled) return null;
 
+  // ── Active scrape — amber card matching the prototype design ─────────────
+  if (isActive) {
+    return (
+      <div
+        className="mt-6 rounded-[10px] bg-[#fff7d6] dark:bg-[#3a3206] border border-warning/40 px-5 py-4 flex items-center gap-4 animate-fadein"
+      >
+        <div className="w-10 h-10 rounded-full bg-warning/30 flex items-center justify-center text-[#7a4500] dark:text-warning shrink-0">
+          <Sparkles size={20} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="text-[15px] font-semibold text-ink dark:text-d-ink">
+              {run.status === "PENDING" ? "Scrape queued…" : "Scraping in progress…"}
+            </div>
+            <span className="text-[13px] text-body dark:text-d-body">
+              <span className="font-semibold text-ink dark:text-d-ink tabular-nums">{run.newLeadsCount}</span>
+              {" "}lead{run.newLeadsCount === 1 ? "" : "s"} found
+              <span className="text-mute"> · ~3s polling</span>
+            </span>
+            <span className="ml-auto inline-flex items-center gap-1.5 text-[13px] font-medium text-[#7a4500] dark:text-warning">
+              <Loader2 size={13} className="animate-spin" />
+              Working…
+            </span>
+          </div>
+          <div className="mt-2 relative h-1 rounded-full bg-warning/20 overflow-hidden">
+            <div className="absolute inset-y-0 w-1/3 bg-warning rounded-full animate-indeterm" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Failed / cancelled — compact status row ──────────────────────────────
   return (
-    <div className={`mt-4 flex items-center gap-3 rounded-[16px] px-5 py-3.5 text-[14px] ${
-      isFailed     ? "bg-negative/10 border border-negative/30 text-ink dark:text-d-ink" :
-      isCancelled  ? "bg-canvas-soft dark:bg-d-canvas-soft border border-line dark:border-d-line text-mute" :
-                     "bg-primary/15 border border-primary/40 text-ink dark:text-d-ink"
+    <div className={`mt-6 flex items-center gap-3 rounded-[10px] px-5 py-3.5 text-[14px] ${
+      isFailed
+        ? "bg-negative/10 border border-negative/30 text-ink dark:text-d-ink"
+        : "bg-canvas-soft dark:bg-d-canvas-soft border border-line dark:border-d-line text-mute"
     }`}>
-      {isActive    && <Loader2 size={16} className="text-primary shrink-0 animate-spin" />}
       {isFailed    && <span className="text-negative shrink-0">✕</span>}
       {isCancelled && <Square size={14} className="shrink-0" />}
       <span className="font-medium">
-        {run.status === "PENDING"   && "Scrape queued — waiting for worker…"}
-        {run.status === "RUNNING"   && `Scraping in progress… ${run.newLeadsCount} lead${run.newLeadsCount === 1 ? "" : "s"} found so far`}
-        {isFailed                   && `Scrape failed: ${run.errorMessage ?? "Unknown error"}`}
-        {isCancelled                && `Stopped — ${run.newLeadsCount} lead${run.newLeadsCount === 1 ? "" : "s"} saved`}
+        {isFailed && (() => {
+          const msg = run.errorMessage ?? "Unknown error";
+          if (msg.includes("CAPTCHA"))    return "Blocked by Google: CAPTCHA detected. Try again in a few hours or use a different network.";
+          if (msg.includes("IP_BAN"))     return "Blocked by Google: IP banned. Please wait several hours before retrying.";
+          if (msg.includes("RATE_LIMIT")) return "Blocked by Google: rate limited. Wait ~1 hour, then retry.";
+          return `Scrape failed: ${msg}`;
+        })()}
+        {isCancelled && `Stopped — ${run.newLeadsCount} lead${run.newLeadsCount === 1 ? "" : "s"} saved`}
       </span>
     </div>
   );
@@ -179,31 +309,80 @@ function toRunEntries(runs: ScrapeRun[]): RunEntry[] {
 }
 
 export default function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  // useSearchParams (used inside the content component) needs a Suspense boundary.
+  return (
+    <Suspense fallback={<div className="px-8 py-24 text-center text-mute text-sm">Loading…</div>}>
+      <CampaignDetailContent params={params} />
+    </Suspense>
+  );
+}
+
+function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const toast = useToast();
 
-  const { data: campaign, isLoading: campaignLoading } = useQuery<Campaign>({
-    queryKey: ["campaign", id],
-    queryFn: () => fetch(`/api/campaigns/${id}`).then((r) => { if (!r.ok) throw new Error("Not found"); return r.json(); }),
-  });
+  // ── URL-backed table state (Slices 4.5–4.7) ─────────────────────────────
+  // Reads come straight from the URL; writes patch the query string in place.
+  const statusFilter = searchParams.get("status") ?? "ALL";
+  const sort         = searchParams.get("sort")   ?? "created";
+  const dir          = (searchParams.get("dir") === "asc" ? "asc" : "desc") as "asc" | "desc";
+  const page         = Math.max(1, Number(searchParams.get("page")) || 1);
+  const pageSize     = [10, 25, 50, 100].includes(Number(searchParams.get("pageSize")))
+    ? Number(searchParams.get("pageSize"))
+    : 25;
 
-  // Declared early so the leads query can reference it for refetchInterval
+  const setParams = React.useCallback((updates: Record<string, string | null>) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries(updates)) {
+      if (v === null || v === "") sp.delete(k);
+      else sp.set(k, v);
+    }
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  }, [searchParams, router]);
+
+  // Declared early so the campaign query can reference it for refetchInterval
   const [activeRunId, setActiveRunId] = React.useState<string | null>(null);
 
+  const { data: campaign, isLoading: campaignLoading } = useQuery<CampaignWithStats>({
+    queryKey: ["campaign", id],
+    queryFn: () => fetch(`/api/campaigns/${id}`).then((r) => { if (!r.ok) throw new Error("Not found"); return r.json(); }),
+    // Poll while a scrape is active so the stat cards count up in real-time.
+    refetchInterval: activeRunId ? 3000 : false,
+  });
+  const [search, setSearch] = React.useState("");
+
+  // Slice 4.4 — debounce the search input 300 ms before it hits the server.
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const { data: leads = [] } = useQuery<Lead[]>({
-    queryKey: ["leads", id],
-    queryFn: () => fetch(`/api/campaigns/${id}/leads`).then((r) => r.json()),
+    queryKey: ["leads", id, debouncedSearch, statusFilter, sort, dir],
+    queryFn: () => {
+      const sp = new URLSearchParams();
+      if (debouncedSearch) sp.set("q", debouncedSearch);
+      if (statusFilter !== "ALL") sp.set("status", statusFilter);
+      sp.set("sort", sort);
+      sp.set("dir", dir);
+      return fetch(`/api/campaigns/${id}/leads?${sp.toString()}`).then((r) => r.json());
+    },
     enabled: !!campaign,
-    // Refetch every 4 s while a scrape is active so the table fills in real-time
-    refetchInterval: activeRunId ? 4000 : false,
+    // Refetch every 3 s while a scrape is active so the table fills in real-time
+    refetchInterval: activeRunId ? 3000 : false,
   });
 
   const { data: scrapeRuns = [] } = useQuery<ScrapeRun[]>({
     queryKey: ["scrapeRuns", id],
     queryFn: () => fetch(`/api/campaigns/${id}/runs`).then((r) => r.json()),
     enabled: !!campaign,
+    // Poll while a run is active so a pre-existing scrape is detected even
+    // if the page was loaded before the run row appeared.
+    refetchInterval: activeRunId ? 5000 : false,
   });
 
   // Detect any pre-existing active run on load
@@ -265,32 +444,39 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
   const [editOpen, setEditOpen] = React.useState(false);
   const [runOpen, setRunOpen] = React.useState(false);
-  const [search, setSearch] = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState("ALL");
-  const [page, setPage] = React.useState(1);
-  const pageSize = 25;
   const [selected, setSelected] = React.useState(new Set<string>());
 
-  React.useEffect(() => { setPage(1); }, [statusFilter, search]);
+  // Slice 4.2 / 4.3 — which lead's notes / email modal is open
+  const [notesLead, setNotesLead] = React.useState<Lead | null>(null);
+  const [emailLead, setEmailLead] = React.useState<Lead | null>(null);
+
+  // Slice 4.9 — bulk delete confirmation modal
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
+
+  // Reset to page 1 whenever a filter/search/sort narrows the result set.
+  React.useEffect(() => {
+    if (page !== 1) setParams({ page: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, debouncedSearch, sort, dir]);
 
   const isRunning = !!activeRunId && (activeRun?.status === "PENDING" || activeRun?.status === "RUNNING");
 
-  const filtered = React.useMemo(() => leads.filter((l) => {
-    const matchStatus = statusFilter === "ALL" || l.status === statusFilter;
-    const matchSearch = !search || (l.businessName + (l.phone ?? "") + (l.websiteUrl ?? "") + (l.notes ?? "")).toLowerCase().includes(search.toLowerCase());
-    return matchStatus && matchSearch;
-  }), [leads, statusFilter, search]);
+  // Plain stopwatch shown in the Stop button — starts/stops with the run.
+  const elapsed = useStopwatch(isRunning);
 
+  // A search term or a non-ALL status filter means the list is narrowed.
+  const isFiltered = debouncedSearch !== "" || statusFilter !== "ALL";
+
+  // Search, status filter and sort are all server-side (Slices 4.4–4.6).
+  // The leads list arrives already filtered + sorted; just paginate it here.
+  const filtered = leads;
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
-  const stats = React.useMemo(() => {
-    const total = leads.length;
-    const newCount = leads.filter((l) => l.status === "NEW").length;
-    const contacted = leads.filter((l) => ["CONTACTED", "REPLIED", "CLOSED"].includes(l.status ?? "")).length;
-    const replied = leads.filter((l) => l.status === "REPLIED" || l.status === "CLOSED").length;
-    return { total, new: newCount, contacted, conversion: total ? Math.round(replied / total * 100) : 0 };
-  }, [leads]);
+  // Slice 4.11 — stats come from the server (whole-campaign counts, so they
+  // stay correct even when a status filter or search narrows the table).
+  const stats: LeadStats = campaign?.stats ?? { total: 0, new: 0, contacted: 0, conversion: 0 };
 
   const allOnPageSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
   const someOnPageSelected = pageRows.some((r) => selected.has(r.id)) && !allOnPageSelected;
@@ -319,6 +505,137 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     await patchCampaignStatus("ARCHIVED");
     toast.show({ type: "success", title: "Campaign archived", message: campaign?.name });
     router.push("/googlemaps");
+  };
+
+  // ── Slice 4.6 — toggle sort: same column flips direction, new column resets to asc
+  const handleSort = (key: string) => {
+    if (sort === key) {
+      setParams({ dir: dir === "asc" ? "desc" : "asc" });
+    } else {
+      setParams({ sort: key, dir: "asc" });
+    }
+  };
+
+  // ── Slice 4.1 — inline status change with optimistic update + revert ─────
+  const leadsKey = ["leads", id, debouncedSearch, statusFilter, sort, dir];
+  const handleStatusChange = async (lead: Lead, status: string) => {
+    const label = STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
+    const prev = qc.getQueryData<Lead[]>(leadsKey);
+    // Optimistic: patch the cached lead immediately
+    qc.setQueryData<Lead[]>(leadsKey, (old) =>
+      old?.map((l) => (l.id === lead.id ? { ...l, status: status as Lead["status"] } : l)),
+    );
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/status`, {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error("request failed");
+      toast.show({ type: "success", title: "Status updated", message: `Lead marked as ${label}.` });
+      qc.invalidateQueries({ queryKey: ["leads", id] });
+    } catch {
+      if (prev) qc.setQueryData(leadsKey, prev); // revert
+      toast.show({ type: "error", title: "Update failed", message: "Could not change the status." });
+    }
+  };
+
+  // ── Slice 4.2 — save notes ───────────────────────────────────────────────
+  const handleSaveNotes = async (lead: Lead, notes: string) => {
+    const res = await fetch(`/api/leads/${lead.id}/notes`, {
+      method:  "PUT",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ notes }),
+    });
+    if (!res.ok) {
+      toast.show({ type: "error", title: "Save failed", message: "Could not save the note." });
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["leads", id] });
+    toast.show({ type: "success", title: "Note saved", message: `Updated note for ${lead.businessName}.` });
+    setNotesLead(null);
+  };
+
+  // ── Slice 4.3 — save / clear email ───────────────────────────────────────
+  const handleSaveEmail = async (lead: Lead, email: string) => {
+    const res = await fetch(`/api/leads/${lead.id}/email`, {
+      method:  "PUT",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast.show({ type: "error", title: "Save failed", message: data.error ?? "Could not save the email." });
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["leads", id] });
+    toast.show({
+      type: "success",
+      title: email ? "Email saved" : "Email cleared",
+      message: email ? `Set email for ${lead.businessName}.` : `Removed email from ${lead.businessName}.`,
+    });
+    setEmailLead(null);
+  };
+
+  // ── Slice 4.10 — CSV export. Builds the URL for the chosen scope and
+  // triggers a browser download via a temporary anchor.
+  const handleExport = (scope: "all" | "filtered" | "selected") => {
+    const sp = new URLSearchParams({ scope });
+    if (scope === "filtered") {
+      if (debouncedSearch) sp.set("q", debouncedSearch);
+      if (statusFilter !== "ALL") sp.set("status", statusFilter);
+    }
+    if (scope === "selected") {
+      if (selected.size === 0) {
+        toast.show({ type: "warning", title: "Nothing selected", message: "Select leads to export them." });
+        return;
+      }
+      sp.set("ids", [...selected].join(","));
+    }
+    const a = document.createElement("a");
+    a.href = `/api/campaigns/${id}/export?${sp.toString()}`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast.show({ type: "success", title: "Export started", message: "Your CSV download should begin shortly." });
+  };
+
+  // ── Slice 4.9 — bulk status update ───────────────────────────────────────
+  const handleBulkStatus = async (status: string) => {
+    const ids = [...selected];
+    const label = STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
+    const res = await fetch("/api/leads/bulk-status", {
+      method:  "PUT",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ ids, status }),
+    });
+    if (!res.ok) {
+      toast.show({ type: "error", title: "Bulk update failed", message: "Could not update the selected leads." });
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["leads", id] });
+    setSelected(new Set());
+    toast.show({ type: "success", title: "Bulk update done", message: `Marked ${ids.length} lead${ids.length === 1 ? "" : "s"} as ${label}.` });
+  };
+
+  // ── Slice 4.9 — bulk delete ──────────────────────────────────────────────
+  const handleBulkDelete = async () => {
+    const ids = [...selected];
+    const res = await fetch("/api/leads/bulk", {
+      method:  "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ ids }),
+    });
+    if (!res.ok) {
+      toast.show({ type: "error", title: "Delete failed", message: "Could not delete the selected leads." });
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["leads", id] });
+    qc.invalidateQueries({ queryKey: ["campaign", id] });
+    setSelected(new Set());
+    setBulkDeleteOpen(false);
+    toast.show({ type: "success", title: "Leads deleted", message: `Removed ${ids.length} lead${ids.length === 1 ? "" : "s"}.` });
   };
 
   if (campaignLoading) {
@@ -374,14 +691,20 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               leftIcon={<Square size={14} />}
               onClick={handleStop}
             >
-              Stop
+              Stop <span className="tabular-nums font-normal opacity-90">{elapsed}</span>
             </Button>
           )}
           <Menu
             trigger={<Button variant="chip" size="md" rightIcon={<ChevronDown size={14} />} leftIcon={<Download size={14} />}>Export</Button>}
             items={[
-              { label: "Export all leads (CSV)", icon: <Download size={14} />, onClick: () => toast.show({ type: "success", title: "Export ready", message: "Available in Phase 4." }) },
-              { label: "Export filtered (CSV)", icon: <Filter size={14} />, onClick: () => toast.show({ type: "success", title: "Export ready", message: "Available in Phase 4." }) },
+              { label: `Export all leads (${stats.total})`, icon: <Download size={14} />, onClick: () => handleExport("all") },
+              // "Filtered" only shows when a filter is active AND it matched rows.
+              ...(isFiltered && leads.length > 0
+                ? [{ label: `Export filtered (${leads.length})`, icon: <Filter size={14} />, onClick: () => handleExport("filtered") }]
+                : []),
+              ...(selected.size > 0
+                ? [{ label: `Export selected (${selected.size})`, icon: <Check size={14} />, onClick: () => handleExport("selected") }]
+                : []),
             ]}
           />
           <Button variant="chip" size="md" onClick={() => setEditOpen(true)} leftIcon={<Pencil size={14} />}>Edit</Button>
@@ -408,11 +731,15 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Input
-            placeholder="Search by name, phone, notes…"
+            placeholder="Search by name, phone, email, notes…"
             value={search} onChange={(e) => setSearch(e.target.value)}
             className="w-[280px]"
           />
-          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-[170px]">
+          <Select
+            value={statusFilter}
+            onChange={(e) => setParams({ status: e.target.value === "ALL" ? null : e.target.value, page: null })}
+            className="w-[170px]"
+          >
             <option value="ALL">All statuses</option>
             {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </Select>
@@ -428,13 +755,19 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 <th className="py-3 pl-5 pr-3 w-10">
                   <Checkbox checked={allOnPageSelected} indeterminate={someOnPageSelected} onChange={togglePage} />
                 </th>
-                <th className="py-3 px-3">Business</th>
+                <th className="py-3 px-3">
+                  <SortHeader label="Business" sortKey="name" activeSort={sort} activeDir={dir} onSort={handleSort} />
+                </th>
                 <th className="py-3 px-3">Phone</th>
                 <th className="py-3 px-3">Email</th>
                 <th className="py-3 px-3">Website</th>
                 <th className="py-3 px-3">Notes</th>
-                <th className="py-3 px-3">Added</th>
-                <th className="py-3 px-3 pr-5 text-right">Status</th>
+                <th className="py-3 px-3">
+                  <SortHeader label="Added" sortKey="created" activeSort={sort} activeDir={dir} onSort={handleSort} />
+                </th>
+                <th className="py-3 px-3 pr-5 text-right">
+                  <SortHeader label="Status" sortKey="status" activeSort={sort} activeDir={dir} onSort={handleSort} align="right" />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -443,16 +776,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   key={l.id} lead={l}
                   selected={selected.has(l.id)}
                   onToggle={(on) => toggleOne(l.id, on)}
-                  onStatusChange={async (s) => {
-                    await fetch(`/api/leads/${l.id}`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ status: s }),
-                    });
-                    qc.invalidateQueries({ queryKey: ["leads", id] });
-                    const label = STATUS_OPTIONS.find((o) => o.value === s)?.label ?? s;
-                    toast.show({ type: "success", title: "Status updated", message: `Lead marked as ${label}.` });
-                  }}
+                  onStatusChange={(s) => handleStatusChange(l, s)}
+                  onEditNotes={() => setNotesLead(l)}
+                  onEditEmail={() => setEmailLead(l)}
                 />
               ))}
               {pageRows.length === 0 && (
@@ -470,24 +796,37 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           </table>
         </div>
 
-        <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-t border-line dark:border-d-line text-[13px]">
-          <div className="text-mute">
-            Showing{" "}
-            <span className="text-ink dark:text-d-ink font-medium">
-              {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(filtered.length, page * pageSize)}
-            </span>{" "}
-            of {filtered.length}
+        <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-t border-line dark:border-d-line text-[13px] flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="text-mute">
+              Showing{" "}
+              <span className="text-ink dark:text-d-ink font-medium">
+                {filtered.length === 0 ? 0 : (safePage - 1) * pageSize + 1}–{Math.min(filtered.length, safePage * pageSize)}
+              </span>{" "}
+              of {filtered.length}
+            </div>
+            <Select
+              value={String(pageSize)}
+              onChange={(e) => setParams({ pageSize: e.target.value, page: null })}
+              className="w-[120px]"
+            >
+              {[10, 25, 50, 100].map((n) => (
+                <option key={n} value={n}>{n} / page</option>
+              ))}
+            </Select>
           </div>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+              onClick={() => setParams({ page: String(Math.max(1, safePage - 1)) })}
+              disabled={safePage === 1}
               className="p-1.5 rounded-[10px] hover:bg-canvas-soft dark:hover:bg-d-canvas-soft text-ink dark:text-d-ink disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronLeft size={16} />
             </button>
-            <div className="px-2 text-mute">Page <span className="text-ink dark:text-d-ink font-medium">{page}</span> of {totalPages}</div>
+            <div className="px-2 text-mute">Page <span className="text-ink dark:text-d-ink font-medium">{safePage}</span> of {totalPages}</div>
             <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+              onClick={() => setParams({ page: String(Math.min(totalPages, safePage + 1)) })}
+              disabled={safePage === totalPages}
               className="p-1.5 rounded-[10px] hover:bg-canvas-soft dark:hover:bg-d-canvas-soft text-ink dark:text-d-ink disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronRight size={16} />
@@ -513,24 +852,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             type: "menu", label: "Set status",
             items: STATUS_OPTIONS.map((s) => ({
               label: s.label,
-              onClick: async () => {
-                await Promise.all(
-                  [...selected].map((lid) =>
-                    fetch(`/api/leads/${lid}`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ status: s.value }),
-                    })
-                  )
-                );
-                qc.invalidateQueries({ queryKey: ["leads", id] });
-                setSelected(new Set());
-                toast.show({ type: "success", title: "Bulk update done", message: `Marked ${selected.size} leads as ${s.label}.` });
-              },
+              onClick: () => handleBulkStatus(s.value),
             })),
           },
           { type: "divider" },
-          { type: "button", label: "Delete", icon: <X size={14} />, danger: true, onClick: () => setSelected(new Set()) },
+          { type: "button", label: "Export", icon: <Download size={14} />, onClick: () => handleExport("selected") },
+          { type: "divider" },
+          { type: "button", label: "Delete", icon: <Trash2 size={14} />, danger: true, onClick: () => setBulkDeleteOpen(true) },
         ]}
       />
 
@@ -548,6 +876,43 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         onClose={() => setRunOpen(false)}
         onStarted={(runId) => setActiveRunId(runId)}
       />
+
+      <NotesModal
+        open={!!notesLead}
+        lead={notesLead}
+        onClose={() => setNotesLead(null)}
+        onSave={(notes) => { if (notesLead) return handleSaveNotes(notesLead, notes); }}
+      />
+
+      <EmailModal
+        open={!!emailLead}
+        lead={emailLead}
+        onClose={() => setEmailLead(null)}
+        onSave={(email) => { if (emailLead) return handleSaveEmail(emailLead, email); }}
+      />
+
+      {/* Slice 4.9 — bulk delete confirmation */}
+      <Modal open={bulkDeleteOpen} onClose={() => setBulkDeleteOpen(false)} width={440} labelledBy="bulk-delete-title">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-full bg-negative/10 flex items-center justify-center text-negative shrink-0">
+            <Trash2 size={18} />
+          </div>
+          <div>
+            <h2 id="bulk-delete-title" className="text-[18px] font-semibold text-ink dark:text-d-ink">
+              Delete {selected.size} lead{selected.size === 1 ? "" : "s"}?
+            </h2>
+            <p className="text-[13px] text-mute mt-1">
+              This permanently removes the selected lead{selected.size === 1 ? "" : "s"} and their history. This cannot be undone.
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 flex items-center justify-end gap-2">
+          <Button variant="ghost" onClick={() => setBulkDeleteOpen(false)}>Cancel</Button>
+          <Button variant="destructive" onClick={handleBulkDelete} leftIcon={<Trash2 size={14} />}>
+            Delete {selected.size} lead{selected.size === 1 ? "" : "s"}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -5,8 +5,20 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET() {
   const campaigns = await db.campaign.findMany({
     orderBy: { createdAt: "desc" },
+    include: {
+      _count: {
+        select: {
+          leads: {
+            where: { status: { in: ["CONTACTED", "REPLIED", "CLOSED"] } },
+          },
+        },
+      },
+    },
   });
-  return NextResponse.json(campaigns);
+  // Flatten _count into the response so clients see contactedLeads directly
+  return NextResponse.json(
+    campaigns.map(({ _count, ...c }) => ({ ...c, contactedLeads: _count.leads }))
+  );
 }
 
 export async function POST(req: NextRequest) {

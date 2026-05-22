@@ -2,8 +2,8 @@
 
 > **Goal:** Make scrapes survive the real world. Detect Google blocks, recover from crashes, support clean cancellation, and ensure the UI never gets stuck.
 
-**Status:** NOT STARTED
-**Last Updated:** –
+**Status:** COMPLETED
+**Last Updated:** 2026-05-21
 
 **Prerequisites:** [Phase 2](./PHASE_2_SCRAPER.md) completed.
 
@@ -13,14 +13,14 @@
 
 | # | Slice | Status |
 |---|---|---|
-| 3.1 | Block detection (`detectBlock`) — soft, hard, IP ban | NOT STARTED |
-| 3.2 | Block handling: stop scrape, mark FAILED, surface in UI | NOT STARTED |
-| 3.3 | Smart waits — replace fixed timeouts with `waitForSelector` / `waitForFunction` | NOT STARTED |
-| 3.4 | Random user-agent rotation per run | NOT STARTED |
-| 3.5 | Worker crash recovery — orphan run reaper | NOT STARTED |
-| 3.6 | `POST /api/scrape/stop` + Stop Scraping button | NOT STARTED |
-| 3.7 | Run history table on campaign detail page (collapsed by default) | NOT STARTED |
-| 3.8 | Tests for block detection, cancellation, orphan recovery | NOT STARTED |
+| 3.1 | Block detection (`detectBlock`) — soft, hard, IP ban | COMPLETED |
+| 3.2 | Block handling: stop scrape, mark FAILED, surface in UI | COMPLETED |
+| 3.3 | Smart waits — replace fixed timeouts with `waitForSelector` / `waitForFunction` | COMPLETED |
+| 3.4 | Random user-agent rotation per run | COMPLETED |
+| 3.5 | Worker crash recovery — orphan run reaper | COMPLETED |
+| 3.6 | `POST /api/scrape/stop` + Stop Scraping button | COMPLETED |
+| 3.7 | Run history table on campaign detail page (collapsed by default) | COMPLETED |
+| 3.8 | Tests for block detection, cancellation, orphan recovery | COMPLETED |
 
 ---
 
@@ -77,16 +77,18 @@ When `detectBlock` returns non-NONE:
 
 ### Slice 3.3 — Smart waits
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
-Audit `apps/scraper/google-maps.ts` and replace:
+Audited `apps/scraper/google-maps.ts` and replaced:
 
-- Any `page.waitForTimeout(N)` used to wait for content → `page.waitForSelector` or `page.waitForFunction`.
-- Keep random delays ONLY between scrolls (these mimic human pauses, not content waits).
+- `page.waitForTimeout()` content waits → `page.waitForSelector` / `page.waitForFunction`.
+- Detail-panel extraction waits for the panel's `role="main"` `aria-label` to become
+  a real business name (`waitForFunction`), not a fixed sleep.
+- Random delays kept ONLY between cards/scrolls (human-pause mimicry) via `randomDelay()`.
+- Detail panels are now scraped **in-place** (no `page.goto()` reload per lead) — this
+  eliminated the ~30 s/lead slowdown and the stale "ফলাফল" heading bug.
 
-Add a helper `randomDelay(minMs, maxMs)` and use it consistently.
-
-**Test notes:** No new test, but existing scraper test should still pass and run faster.
+**Test notes:** No new test; existing scraper tests still pass and run faster.
 
 ---
 
