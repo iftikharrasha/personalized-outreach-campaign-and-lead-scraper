@@ -7,39 +7,33 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    darkMode: 'class',
-    theme: {
-      extend: {
-        colors: {
-          primary:        '#9fe870',
-          'primary-hover':'#cdffad',
-          'primary-pale': '#e2f6d5',
-          canvas:         '#ffffff',
-          'canvas-soft':  '#e8ebe6',
-          ink:            '#0e0f0c',
-          body:           '#454745',
-          mute:           '#868685',
-          positive:       '#2ead4b',
-          warning:        '#ffd11a',
-          negative:       '#d03238',
-          line:           '#e2e8e0',
-          /* dark */
-          'd-canvas':     '#1f221c',
-          'd-canvas-soft':'#14150f',
-          'd-ink':        '#f6f7f3',
-          'd-body':       '#b8bab5',
-          'd-mute':       '#868685',
-          'd-line':       '#2a2c27',
-        },
-        fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
-        borderRadius: { card: '24px' },
-      },
-    },
-  };
-</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.4/dist/index.global.js"></script>
+<style type="text/tailwindcss">
+  /* Tailwind v4 — class-based dark mode + custom palette + radius token */
+  @custom-variant dark (&:where(.dark, .dark *));
+  @theme {
+    --color-primary:        #9fe870;
+    --color-primary-hover:  #cdffad;
+    --color-primary-pale:   #e2f6d5;
+    --color-canvas:         #ffffff;
+    --color-canvas-soft:    #e8ebe6;
+    --color-ink:            #0e0f0c;
+    --color-body:           #454745;
+    --color-mute:           #868685;
+    --color-positive:       #2ead4b;
+    --color-warning:        #ffd11a;
+    --color-negative:       #d03238;
+    --color-line:           #e2e8e0;
+    --color-d-canvas:       #1f221c;
+    --color-d-canvas-soft:  #14150f;
+    --color-d-ink:          #f6f7f3;
+    --color-d-body:         #b8bab5;
+    --color-d-mute:         #868685;
+    --color-d-line:         #2a2c27;
+    --font-sans:            'Inter', system-ui, sans-serif;
+    --radius-card:          24px;
+  }
+</style>
 <style>
   html, body { font-family: 'Inter', system-ui, sans-serif; }
   body { background:#e8ebe6; color:#0e0f0c; -webkit-font-smoothing: antialiased; }
@@ -63,25 +57,6 @@
   @keyframes indeterm { 0% { transform: translateX(-100%);} 100% { transform: translateX(250%);} }
   .bar-indeterm { animation: indeterm 1.6s ease-in-out infinite; }
 
-  /* "email just landed" row flash — fades from primary-pale to transparent */
-  @keyframes flashfound {
-    0%   { background-color: rgba(159, 232, 112, 0.45); }
-    100% { background-color: rgba(159, 232, 112, 0); }
-  }
-  .flash-found { animation: flashfound 1.8s ease-out 1; }
-  @keyframes popemail {
-    0%   { opacity: 0; transform: translateY(-4px); }
-    60%  { opacity: 1; transform: translateY(0); }
-    100% { opacity: 1; transform: translateY(0); }
-  }
-  .pop-email { animation: popemail .32s ease-out both; }
-  /* soft pulse for the "searching this lead" inline state */
-  @keyframes searchpulse {
-    0%, 100% { opacity: .55; }
-    50%      { opacity: 1; }
-  }
-  .pulse-search { animation: searchpulse 1.2s ease-in-out infinite; }
-
   /* focus rings */
   button:focus-visible, [role="button"]:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
     outline: 2px solid #9fe870; outline-offset: 2px; border-radius: 8px;
@@ -94,6 +69,13 @@
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 </head>
 <body style="background-color: rgb(255, 255, 255); font-family: system-ui">
+  <template id="__bundler_thumbnail" data-bg-color="#0e0f0c">
+    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="200" rx="44" fill="#0e0f0c"/>
+      <path d="M100 50c-22.1 0-40 17.4-40 38.8 0 27.2 31.4 55.1 37.7 60.5a3.5 3.5 0 0 0 4.6 0c6.3-5.4 37.7-33.3 37.7-60.5C140 67.4 122.1 50 100 50Z" fill="#9fe870"/>
+      <circle cx="100" cy="87" r="13.5" fill="#0e0f0c"/>
+    </svg>
+  </template>
   <div id="root"></div>
 
   <script type="text/babel" src="icons.jsx"></script>
@@ -103,7 +85,6 @@
   <script type="text/babel" src="bulk-actions.jsx"></script>
   <script type="text/babel" src="edit-modal.jsx"></script>
   <script type="text/babel" src="run-history.jsx"></script>
-  <script type="text/babel" src="enrichment.jsx"></script>
   <script type="text/babel" src="screens.jsx"></script>
   <script type="text/babel" src="screens-detail.jsx"></script>
   <script type="text/babel" src="dashboard.jsx"></script>

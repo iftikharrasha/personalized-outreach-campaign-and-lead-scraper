@@ -13,7 +13,8 @@ export interface RunEntry {
   status: "COMPLETED" | "FAILED" | "CANCELLED" | "RUNNING" | "PENDING";
   newLeads: number;
   dupes: number;
-  durationMin?: number | null;
+  /** Raw seconds from the DB — formatted for display by fmtDuration(). */
+  durationSec?: number | null;
   error?: string | null;
 }
 
@@ -24,6 +25,14 @@ interface RunHistoryCardProps {
   showCampaign?: boolean;
   onOpenCampaign?: (id: string) => void;
   defaultOpen?: boolean;
+}
+
+function fmtDuration(sec: number | null | undefined): string {
+  if (sec == null) return "—";
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
 const runTone = (status: RunEntry["status"]) => {
@@ -66,7 +75,7 @@ function RunHistoryTable({ runs, showCampaign = false, onOpenCampaign }: Pick<Ru
               <td className="py-3 px-3 text-right tabular-nums text-ink dark:text-d-ink font-medium">{r.newLeads}</td>
               <td className="py-3 px-3 text-right tabular-nums text-mute">{r.dupes}</td>
               <td className="py-3 px-3 text-[12.5px] text-mute max-w-[280px] truncate">{r.error ?? "—"}</td>
-              <td className="py-3 px-3 text-right tabular-nums text-mute">{r.durationMin != null ? `${r.durationMin}m` : "—"}</td>
+              <td className="py-3 px-3 text-right tabular-nums text-mute">{fmtDuration(r.durationSec)}</td>
               <td className="py-3 px-3 pr-5 text-right">
                 <Badge size="sm" tone={runTone(r.status)}>{r.status}</Badge>
               </td>

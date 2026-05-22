@@ -1,14 +1,132 @@
 // ───────── Mock data ─────────
 
-const CATEGORIES = [
-  { value: 'restaurants',    label: 'Restaurants' },
-  { value: 'dentists',       label: 'Dentists' },
-  { value: 'lawyers',        label: 'Personal Injury Lawyers' },
-  { value: 'plumbers',       label: 'Plumbers' },
-  { value: 'cafes',          label: 'Cafes & Coffee Shops' },
-  { value: 'gyms',           label: 'Gyms & Fitness' },
-  { value: 'auto',           label: 'Auto Repair Shops' },
-  { value: 'custom',         label: 'Custom keyword…' },
+// ── Sources ───────────────────────────────────────────────────────────────
+// Each scraper has its own vocabulary. Centralised here so the screens can
+// re-label themselves (sidebar, breadcrumb, query preview, run modal copy)
+// off a single source descriptor instead of hard-coding "Google Maps" in
+// twelve places.
+const SOURCES = {
+  gmaps: {
+    id: 'gmaps',
+    label: 'Google Maps',
+    sidebar: 'Google Maps Scraper',
+    breadcrumb: 'Google Maps Scraper',
+    queryLabel: 'Google Maps query',
+    queryHint:  'The exact query that will be searched on Google Maps',
+    locationKind: 'city',        // city + state under a country
+    leadEntity:   'businesses',
+    leadEntityOne:'business',
+    statePlaceholder: 'San Diego',
+    emptyTitle: 'No campaigns yet',
+    emptyBody:  'Create your first campaign to start scraping leads from Google Maps. Each campaign is a single keyword tied to a location.',
+    blockedCopy:'Google rate-limited last run. Scrapes paused until cooldown ends.',
+  },
+  yelp: {
+    id: 'yelp',
+    label: 'Yelp',
+    sidebar: 'Yelp Scraper',
+    breadcrumb: 'Yelp Scraper',
+    queryLabel: 'Yelp search',
+    queryHint:  'Yelp uses category + city/neighborhood. Same shape as the URL bar on yelp.com.',
+    locationKind: 'city',
+    leadEntity:   'businesses',
+    leadEntityOne:'business',
+    statePlaceholder: 'Brooklyn',
+    emptyTitle: 'No Yelp campaigns yet',
+    emptyBody:  'Each campaign is one Yelp category in one city or neighborhood. The scraper pulls business cards from the results panel exactly like a person scrolling.',
+    blockedCopy:'Yelp showed a CAPTCHA last run. Sit out the cooldown before retrying.',
+  },
+  linkedin: {
+    id: 'linkedin',
+    label: 'LinkedIn',
+    sidebar: 'LinkedIn Scraper',
+    breadcrumb: 'LinkedIn Scraper',
+    queryLabel: 'LinkedIn People search',
+    queryHint:  'Built from job title + metro + industry. Mirrors the LinkedIn People search URL.',
+    locationKind: 'metro',       // metro area + industry, no state
+    leadEntity:   'people',
+    leadEntityOne:'person',
+    statePlaceholder: 'Greater New York Area',
+    emptyTitle: 'No LinkedIn campaigns yet',
+    emptyBody:  'Each campaign targets one job title + one metro. The scraper opens People search and collects up to 100 profiles per page until you hit the weekly view ceiling.',
+    blockedCopy:'LinkedIn flagged the session — weekly view limit hit. Wait until Monday.',
+  },
+};
+
+// Per-source category dropdowns. CATEGORIES (alias of gmaps) is kept for
+// backward compat with anything that imports it directly.
+const CATEGORIES_BY_SOURCE = {
+  gmaps: [
+    { value: 'restaurants',    label: 'Restaurants' },
+    { value: 'dentists',       label: 'Dentists' },
+    { value: 'lawyers',        label: 'Personal Injury Lawyers' },
+    { value: 'plumbers',       label: 'Plumbers' },
+    { value: 'cafes',          label: 'Cafes & Coffee Shops' },
+    { value: 'gyms',           label: 'Gyms & Fitness' },
+    { value: 'auto',           label: 'Auto Repair Shops' },
+    { value: 'custom',         label: 'Custom keyword…' },
+  ],
+  yelp: [
+    { value: 'restaurants',    label: 'Restaurants' },
+    { value: 'coffee',         label: 'Coffee & Tea' },
+    { value: 'bars',           label: 'Bars & Nightlife' },
+    { value: 'beauty',         label: 'Beauty & Spas' },
+    { value: 'home_services',  label: 'Home Services' },
+    { value: 'health',         label: 'Health & Medical' },
+    { value: 'auto',           label: 'Automotive' },
+    { value: 'pets',           label: 'Pet Services' },
+    { value: 'custom',         label: 'Custom keyword…' },
+  ],
+  linkedin: [
+    { value: 'founder',        label: 'Founders & CEOs' },
+    { value: 'marketing_dir',  label: 'Marketing Directors' },
+    { value: 'sales_vp',       label: 'VPs of Sales' },
+    { value: 'eng_lead',       label: 'Engineering Leads' },
+    { value: 'recruiter',      label: 'Recruiters & Talent' },
+    { value: 'product',        label: 'Product Managers' },
+    { value: 'ops',            label: 'COO / Operations Heads' },
+    { value: 'custom',         label: 'Custom title…' },
+  ],
+};
+// Legacy alias — old imports still work
+const CATEGORIES = CATEGORIES_BY_SOURCE.gmaps;
+
+// LinkedIn doesn't search by state — it uses metro areas + industry filter.
+const LINKEDIN_METROS = [
+  'San Francisco Bay Area',
+  'Greater New York Area',
+  'Los Angeles Metro',
+  'Greater Boston Area',
+  'Greater Chicago Area',
+  'Austin, Texas Area',
+  'Seattle Area',
+  'Denver Metro Area',
+  'Atlanta Metro Area',
+  'Miami / Fort Lauderdale Area',
+  'United States',
+];
+const LINKEDIN_INDUSTRIES = [
+  'Any industry',
+  'Software',
+  'E-commerce',
+  'Healthcare',
+  'Real Estate',
+  'Marketing & Advertising',
+  'Finance',
+  'Hospitality',
+  'Education',
+  'Construction',
+  'Manufacturing',
+  'Legal Services',
+];
+const LINKEDIN_SENIORITY = [
+  'Any seniority',
+  'Owner / Partner',
+  'CXO',
+  'VP',
+  'Director',
+  'Manager',
+  'Senior IC',
 ];
 
 const COUNTRIES = [
@@ -28,6 +146,7 @@ const STATES_BY_COUNTRY = {
 const seedCampaigns = [
   {
     id: 'c1',
+    source: 'gmaps',
     name: 'San Diego Restaurants',
     keyword: 'restaurants in San Diego',
     category: 'restaurants',
@@ -40,6 +159,7 @@ const seedCampaigns = [
   },
   {
     id: 'c2',
+    source: 'gmaps',
     name: 'LA Personal Injury Lawyers',
     keyword: 'personal injury lawyers in Los Angeles',
     category: 'lawyers',
@@ -52,6 +172,7 @@ const seedCampaigns = [
   },
   {
     id: 'c3',
+    source: 'gmaps',
     name: 'Chicago Dentists',
     keyword: 'dentists in Chicago',
     category: 'dentists',
@@ -64,6 +185,7 @@ const seedCampaigns = [
   },
   {
     id: 'c4',
+    source: 'gmaps',
     name: 'NY Cafes',
     keyword: 'cafes in Manhattan',
     category: 'cafes',
@@ -76,6 +198,7 @@ const seedCampaigns = [
   },
   {
     id: 'c5',
+    source: 'gmaps',
     name: 'Austin Plumbers',
     keyword: 'plumbers in Austin',
     category: 'plumbers',
@@ -87,6 +210,7 @@ const seedCampaigns = [
   },
   {
     id: 'c6',
+    source: 'gmaps',
     name: 'Seattle Auto Repair',
     keyword: 'auto repair shops in Seattle',
     category: 'auto',
@@ -95,6 +219,134 @@ const seedCampaigns = [
     totalLeads: 118, contacted: 34, newSinceLast: 38,
     lastRun: '8h ago',
     progress: 29,
+  },
+
+  // ── Yelp campaigns ──
+  // Yelp scraping targets the same kind of local-business outreach as the
+  // Google Maps source. Search params live on yelp.com URLs:
+  //   yelp.com/search?find_desc={keyword}&find_loc={location}
+  // Extra fields per business: price level ($–$$$$), rating, review count,
+  // category list, neighborhood, claimed-vs-unclaimed flag.
+  {
+    id: 'y1',
+    source: 'yelp',
+    name: 'Brooklyn Coffee Shops',
+    keyword: 'coffee in Brooklyn, NY',
+    category: 'coffee',
+    country: 'US', state: 'New York', city: 'Brooklyn',
+    status: 'ACTIVE',
+    totalLeads: 87, contacted: 31, newSinceLast: 22,
+    lastRun: '3h ago',
+    progress: 35,
+    notifyEmail: 'you@outrich.app',
+  },
+  {
+    id: 'y2',
+    source: 'yelp',
+    name: 'Miami Fine Dining',
+    keyword: 'fine dining in Miami, FL',
+    category: 'restaurants',
+    country: 'US', state: 'Florida', city: 'Miami',
+    status: 'ACTIVE',
+    totalLeads: 64, contacted: 18, newSinceLast: 31,
+    lastRun: '1d ago',
+    progress: 28,
+    notifyEmail: '',
+  },
+  {
+    id: 'y3',
+    source: 'yelp',
+    name: 'Austin Nail Salons',
+    keyword: 'nail salons in Austin, TX',
+    category: 'beauty',
+    country: 'US', state: 'Texas', city: 'Austin',
+    status: 'PAUSED',
+    totalLeads: 103, contacted: 28, newSinceLast: 16,
+    lastRun: '2d ago',
+    progress: 27,
+    notifyEmail: '',
+  },
+  {
+    id: 'y4',
+    source: 'yelp',
+    name: 'Denver Home Services',
+    keyword: 'plumbers in Denver, CO',
+    category: 'home_services',
+    country: 'US', state: 'Colorado', city: 'Denver',
+    status: 'ACTIVE',
+    totalLeads: 49, contacted: 11, newSinceLast: 18,
+    lastRun: '6h ago',
+    progress: 22,
+    notifyEmail: '',
+  },
+
+  // ── LinkedIn campaigns ──
+  // Different shape from Google Maps + Yelp: we're scraping *people*, not
+  // businesses. Fields per profile: full name, headline, current role,
+  // current company, location, connection degree (2nd/3rd/Out of network),
+  // mutual count, profile URL. No phone, no website — email is optional
+  // and stays manual (LinkedIn doesn't expose it).
+  // Status maps cleanly: NEW → CONTACTED (connection request sent) →
+  // REPLIED (accepted + replied to first message) → CLOSED.
+  {
+    id: 'ln1',
+    source: 'linkedin',
+    name: 'SF Bay Area Founders',
+    keyword: 'Founder OR CEO · Software · SF Bay Area',
+    category: 'founder',
+    country: 'US', state: 'California', city: 'San Francisco Bay Area',
+    industry: 'Software',
+    seniority: 'Owner / Partner',
+    status: 'ACTIVE',
+    totalLeads: 76, contacted: 41, newSinceLast: 18,
+    lastRun: '4h ago',
+    progress: 54,
+    notifyEmail: 'you@outrich.app',
+  },
+  {
+    id: 'ln2',
+    source: 'linkedin',
+    name: 'NYC Marketing Directors',
+    keyword: 'Marketing Director · E-commerce · Greater New York',
+    category: 'marketing_dir',
+    country: 'US', state: 'New York', city: 'Greater New York Area',
+    industry: 'E-commerce',
+    seniority: 'Director',
+    status: 'ACTIVE',
+    totalLeads: 124, contacted: 67, newSinceLast: 29,
+    lastRun: '1d ago',
+    progress: 54,
+    notifyEmail: '',
+  },
+  {
+    id: 'ln3',
+    source: 'linkedin',
+    name: 'Boston Engineering Leads',
+    keyword: 'VP Engineering OR Head of Engineering · Boston',
+    category: 'eng_lead',
+    country: 'US', state: 'Massachusetts', city: 'Greater Boston Area',
+    industry: 'Software',
+    seniority: 'VP',
+    status: 'PAUSED',
+    totalLeads: 58, contacted: 22, newSinceLast: 12,
+    lastRun: '4d ago',
+    progress: 38,
+    notifyEmail: '',
+  },
+  {
+    id: 'ln4',
+    source: 'linkedin',
+    name: 'LA Tech Recruiters',
+    keyword: 'Technical Recruiter · Los Angeles Metro',
+    category: 'recruiter',
+    country: 'US', state: 'California', city: 'Los Angeles Metro',
+    industry: 'Software',
+    seniority: 'Manager',
+    status: 'ACTIVE',
+    totalLeads: 92, contacted: 38, newSinceLast: 24,
+    lastRun: '9h ago',
+    progress: 41,
+    notifyEmail: '',
   },
 ];
 
@@ -175,6 +427,146 @@ const seedLeads = leadNamesPool.map((row, i) => {
   };
 });
 
+// ── Yelp leads (for y1: Brooklyn Coffee Shops) ──
+// Yelp gives us richer business cards than Google Maps: price level,
+// star rating, review count, neighborhood, category list, and a
+// "Claimed" flag (whether the owner verified the listing). All of these
+// surface as columns or chips on the leads table.
+const yelpLeadsPool = [
+  // [name, phone, website, rating, reviews, price, primaryCategory, neighborhood, claimed]
+  ['Devoción',              '347-294-7724', 'devocion.com',           4.6, 1284, '$$', 'Coffee & Tea',          'Williamsburg', true ],
+  ['Variety Coffee Roasters','718-628-6300', 'varietycoffeeroasters.com',4.4, 962,  '$$', 'Coffee & Tea',          'Bushwick',     true ],
+  ['Sey Coffee',            '718-484-1340', 'seycoffee.com',          4.7, 1573, '$$', 'Coffee & Tea, Cafes',   'East Williamsburg', true ],
+  ['Toby\'s Estate',        '347-457-6160', 'tobysestate.com',        4.3, 1108, '$$', 'Coffee & Tea',          'Williamsburg', true ],
+  ['Café Grumpy',           '718-989-5444', 'cafegrumpy.com',         4.2, 489,  '$',  'Coffee & Tea, Bakeries','Greenpoint',   true ],
+  ['Hungry Ghost',          '718-484-7521', 'hungryghostbrooklyn.com',4.5, 712,  '$',  'Coffee & Tea',          'Fort Greene',  true ],
+  ['Konditori',             '718-384-6373', 'konditori-nyc.com',      4.3, 351,  '$',  'Coffee & Tea, Bakeries','Park Slope',   false],
+  ['Bowery Coffee',         '929-298-0044', '',                       4.1, 246,  '$',  'Coffee & Tea',          'Crown Heights',false],
+  ['Mast Books & Coffee',   '347-294-1822', 'mastbooksnyc.com',       4.6, 197,  '$$', 'Coffee & Tea, Bookstores','Bushwick',  true ],
+  ['Brooklyn Roasting Co.', '718-855-1000', 'brooklynroasting.com',   4.4, 1842, '$',  'Coffee Roasteries',     'DUMBO',        true ],
+  ['Parlor Coffee',         '',             'parlorcoffee.com',       4.7, 184,  '$$', 'Coffee & Tea',          'Sunset Park',  false],
+  ['Hidden Grounds',        '347-294-3920', '',                       4.0, 92,   '$',  'Coffee & Tea',          'Williamsburg', false],
+  ['Stovetop Coffee',       '347-457-3001', 'stovetopcoffee.com',     4.8, 142,  '$$', 'Coffee & Tea',          'Carroll Gardens',true],
+  ['Forty Weight',          '718-389-2110', '',                       4.5, 89,   '$',  'Coffee & Tea',          'Greenpoint',   true ],
+  ['Cafe Reggio Brooklyn',  '718-555-0188', '',                       4.2, 233,  '$',  'Coffee & Tea, Italian', 'Bay Ridge',    false],
+  ['Ovenly Cafe',           '347-689-3608', 'oven.ly',                4.4, 567,  '$$', 'Bakeries, Coffee & Tea','Greenpoint',   true ],
+  ['Little Skips',          '718-484-0980', 'littleskips.com',        4.1, 421,  '$',  'Coffee & Tea',          'Bushwick',     true ],
+  ['Café Mogador',          '718-486-9222', 'cafemogador.com',        4.2, 1287, '$$', 'Mediterranean, Coffee', 'Williamsburg', true ],
+  ['Black Brick',           '718-907-4500', '',                       4.5, 312,  '$$', 'Coffee & Tea',          'Williamsburg', true ],
+  ['Joe Coffee Bk',         '212-555-0193', 'joecoffeecompany.com',   4.0, 421,  '$',  'Coffee & Tea',          'Cobble Hill',  true ],
+  ['West~bourne Coffee',    '',             '',                       4.3, 67,   '$$', 'Coffee & Tea',          'Brooklyn Heights', false],
+  ['Coyote Coffee Bar',     '347-689-1245', 'coyote.coffee',          4.7, 281,  '$$', 'Coffee & Tea',          'Park Slope',   true ],
+  ['Madman Espresso',       '929-208-7700', 'madmanespresso.com',     4.6, 314,  '$$', 'Coffee & Tea',          'DUMBO',        true ],
+  ['Whirlybird',            '',             '',                       4.4, 105,  '$',  'Coffee & Tea',          'Bed-Stuy',     false],
+  ['Cup of Gold',           '718-921-4456', '',                       4.3, 78,   '$',  'Coffee & Tea',          'Sunset Park',  false],
+];
+const yelpStatuses = ['NEW','NEW','CONTACTED','REPLIED','NEW','NEW','CONTACTED','NEW','NEW','CONTACTED','NEW','IGNORED','REPLIED','NEW','NEW','CONTACTED','NEW','REPLIED','NEW','CLOSED','NEW','NEW','CONTACTED','NEW','NEW'];
+const yelpNotesPool = {
+  2: 'Owner answered the phone — wants a sample of website redesigns next week.',
+  3: 'Manager replied via DM. Sent them three site references.',
+  6: 'Left voicemail re: online ordering integration.',
+  9: 'Asked about a delivery flow rebuild. Pricing on Tuesday.',
+  12: 'Closed: lead designer for new menu rollout. $1,400.',
+  15: 'Wants pricing for SEO + Yelp profile cleanup.',
+  17: 'Asked us to follow up after their spring renovation.',
+  19: 'CLOSED — full Squarespace rebuild, signed off Friday.',
+  22: 'Got Instagram referral. Discovery call booked.',
+};
+const seedLeadsYelp = yelpLeadsPool.map((row, i) => ({
+  id: 'yl' + i,
+  campaignId: 'y1',
+  source: 'yelp',
+  name: row[0],
+  phone: row[1],
+  website: row[2],
+  rating: row[3],
+  reviews: row[4],
+  price: row[5],
+  primaryCategory: row[6],
+  neighborhood: row[7],
+  claimed: row[8],
+  email: '',
+  status: yelpStatuses[i] || 'NEW',
+  notes: yelpNotesPool[i] || '',
+  addedAt: ['1d ago','2d ago','3d ago','4d ago','5d ago','1w ago','2w ago'][i % 7],
+}));
+
+// ── LinkedIn leads (for ln1: SF Bay Area Founders) ──
+// People, not businesses. We extract from People-search cards:
+//   - Full name + headline
+//   - Current role + current company (parsed out of the headline)
+//   - Location (metro string LinkedIn shows)
+//   - Connection degree: 2nd / 3rd / Out of network
+//   - Mutual connections count (clickable on LinkedIn)
+//   - Profile URL slug
+// No phone, no website. Email stays manual — LinkedIn never exposes it.
+const linkedinLeadsPool = [
+  // [name, role, company, location, degree, mutuals, slug, premium]
+  ['Maya Chen',        'Founder & CEO',          'Stealth (Logistics)',   'San Francisco, CA',  '2nd', 12, 'maya-chen-04',     true ],
+  ['Ravi Subramanian', 'Co-founder, CEO',        'Vellum AI',             'San Francisco, CA',  '2nd', 28, 'ravisub',          false],
+  ['Liana Park',       'Founder',                'Field Notes (YC W25)',  'San Jose, CA',       '3rd', 4,  'lianapark',        true ],
+  ['Theo Martinez',    'CEO',                    'Northbeam Robotics',    'Palo Alto, CA',      '2nd', 19, 'theom',            true ],
+  ['Anjali Desai',     'Founder & CTO',          'Routebox',              'San Francisco, CA',  '2nd', 35, 'anjalidesai',      false],
+  ['Sam Whitaker',     'Founder',                'Hatchet (Devtools)',    'Oakland, CA',        '3rd', 2,  'swhitaker',        false],
+  ['Priya Iyer',       'Co-founder',             'Cofactor Bio',          'San Francisco, CA',  '2nd', 11, 'piyer',            true ],
+  ['Daniel Okafor',    'Founder & CEO',          'Quill Finance',         'San Francisco, CA',  '2nd', 7,  'okafor',           true ],
+  ['Hannah Goldberg',  'Founder',                'Marble (E-commerce)',   'Berkeley, CA',       '3rd', 1,  'hannahg',          false],
+  ['Wei Zhang',        'CEO & Co-founder',       'PulseGrid',             'San Francisco, CA',  '2nd', 22, 'weizhang-pg',      false],
+  ['Marcus Bell',      'Founder',                'Tangent Labs',          'Mountain View, CA',  '2nd', 14, 'marcusbell',       true ],
+  ['Sofia Almeida',    'Founder & CEO',          'Brillo (Consumer SaaS)','San Francisco, CA',  '3rd', 0,  'sofia-almeida',    true ],
+  ['Aaron Kapoor',     'CEO',                    'Underline Inc.',        'San Francisco, CA',  '2nd', 17, 'aaronkapoor',      false],
+  ['Nikki Park',       'Co-founder, COO',        'Cardinal AI',           'San Mateo, CA',      '2nd', 25, 'nikkipark',        true ],
+  ['Eli Brenner',      'Founder & CEO',          'Greenframe',            'San Francisco, CA',  '3rd', 3,  'elibrenner',       false],
+  ['Yusuf Adebayo',    'CEO',                    'Lapwing Systems',       'San Francisco, CA',  '2nd', 9,  'yadebayo',         false],
+  ['Tessa Holloway',   'Founder',                'Atrium Health Tech',    'Sausalito, CA',      '3rd', 5,  'tessah',           true ],
+  ['Jonas Wirth',      'Co-founder & CTO',       'Northbase',             'San Francisco, CA',  '2nd', 31, 'jonasw',           true ],
+  ['Carmen Vasquez',   'Founder & CEO',          'Sundial (Wellness)',    'San Francisco, CA',  '2nd', 13, 'cvasquez',         false],
+  ['Ben Yi',           'Founder',                'Pebble Robotics',       'Redwood City, CA',   '3rd', 1,  'ben-yi',           false],
+  ['Asha Mehta',       'Co-founder, CEO',        'Forge Climate',         'Berkeley, CA',       '2nd', 18, 'amehta',           true ],
+  ['Felix Bauer',      'Founder & CEO',          'Stitchwork',            'San Francisco, CA',  '3rd', 0,  'felixbauer',       false],
+  ['Olivia Reed',      'Founder',                'Nimbus Insurance',      'San Francisco, CA',  '2nd', 11, 'oliviareed',       true ],
+  ['Hiroshi Tanaka',   'Co-founder & CEO',       'Lattice Genomics',      'South San Francisco','2nd', 23, 'hiroshi-t',        true ],
+  ['Camille Dubois',   'Founder',                'Trellis (Marketplace)', 'San Francisco, CA',  '2nd', 8,  'camilledubois',    false],
+];
+const linkedinStatuses = ['CONTACTED','REPLIED','NEW','CONTACTED','REPLIED','NEW','CONTACTED','CONTACTED','NEW','REPLIED','NEW','NEW','CONTACTED','REPLIED','NEW','CONTACTED','NEW','REPLIED','CONTACTED','NEW','CLOSED','NEW','REPLIED','CONTACTED','NEW'];
+const linkedinNotesPool = {
+  0: 'Sent connection note: "Saw your post on warehouse routing — happy to share what we did for X."',
+  1: 'Replied. Booked a call for Thursday at 11am PT.',
+  3: 'Connected but no reply yet. Follow up next week.',
+  4: 'Replied: not actively hiring agencies, refer me to their head of design.',
+  7: 'Sent a 2-step InMail sequence. Day 4.',
+  9: 'Replied + asked for case studies. Sent the e-comm deck.',
+  13: 'Closed-won — landing page sprint, $3,200.',
+  17: 'Replied politely declining. Tag for re-engagement Q4.',
+  20: 'Closed in May. Retained for design system buildout, $4,800.',
+  22: 'Asked for pricing. Sent options.',
+};
+const linkedinEmailPool = {
+  1: 'ravi@vellum.ai',
+  4: 'anjali@routebox.com',
+  9: 'wei@pulsegrid.io',
+  13: 'nikki@cardinal.ai',
+  20: 'asha@forgeclimate.com',
+};
+const seedLeadsLinkedIn = linkedinLeadsPool.map((row, i) => ({
+  id: 'lnl' + i,
+  campaignId: 'ln1',
+  source: 'linkedin',
+  name: row[0],
+  role: row[1],
+  company: row[2],
+  location: row[3],
+  degree: row[4],
+  mutuals: row[5],
+  profileSlug: row[6],
+  premium: row[7],
+  headline: `${row[1]} at ${row[2]}`,
+  email: linkedinEmailPool[i] || '',
+  status: linkedinStatuses[i] || 'NEW',
+  notes: linkedinNotesPool[i] || '',
+  addedAt: ['1d ago','2d ago','3d ago','4d ago','5d ago','1w ago','2w ago'][i % 7],
+}));
+
 const seedRunHistory = [
   { id: 'r1', startedAt: '2h ago',  finishedAt: '2h ago',  status: 'COMPLETED', newLeads: 47, dupes: 8,  error: null, durationMin: 11 },
   { id: 'r2', startedAt: '1d ago',  finishedAt: '1d ago',  status: 'COMPLETED', newLeads: 32, dupes: 14, error: null, durationMin: 9  },
@@ -245,7 +637,10 @@ const globalRunHistory = [
 
 Object.assign(window, {
   CATEGORIES, COUNTRIES, STATES_BY_COUNTRY,
-  seedCampaigns, seedLeads, seedRunHistory, STATUS_OPTIONS,
+  SOURCES, CATEGORIES_BY_SOURCE,
+  LINKEDIN_METROS, LINKEDIN_INDUSTRIES, LINKEDIN_SENIORITY,
+  seedCampaigns, seedLeads, seedLeadsYelp, seedLeadsLinkedIn,
+  seedRunHistory, STATUS_OPTIONS,
   businessMetrics, closedLeads,
   globalRunHistory,
 });

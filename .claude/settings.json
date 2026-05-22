@@ -5,7 +5,11 @@
       "Bash(node scripts/fix-cleanphone.cjs)",
       "Bash(npx tsc *)",
       "Read(//e/Github/**)",
-      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")"
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")",
+      "Bash(mkdir -p \"e:/Github/personalized-outreach-campaign-and-lead-scraper/apps/web/app/api/enrich/[runId]/cancel\")"
+    ],
+    "additionalDirectories": [
+      "e:\\Github\\personalized-outreach-campaign-and-lead-scraper\\apps\\web\\app\\api\\enrich\\[runId]"
     ]
   }
 }

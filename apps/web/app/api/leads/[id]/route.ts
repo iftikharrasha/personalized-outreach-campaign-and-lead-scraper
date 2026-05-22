@@ -7,7 +7,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
 
-  const { status, notes, email } = body;
+  const { status, notes, email, businessName, phone, websiteUrl, address } = body;
 
   if (status && !Object.values(LeadStatus).includes(status))
     return NextResponse.json({ error: "invalid status" }, { status: 422 });
@@ -18,9 +18,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const updated = await db.lead.update({
     where: { id },
     data: {
-      ...(status !== undefined && { status }),
-      ...(notes !== undefined && { notes }),
-      ...(email !== undefined && { email }),
+      ...(status       !== undefined && { status }),
+      ...(notes        !== undefined && { notes }),
+      ...(email        !== undefined && { email }),
+      ...(businessName !== undefined && { businessName }),
+      ...(phone        !== undefined && { phone }),
+      ...(websiteUrl   !== undefined && { websiteUrl }),
+      ...(address      !== undefined && { address }),
     },
   });
 

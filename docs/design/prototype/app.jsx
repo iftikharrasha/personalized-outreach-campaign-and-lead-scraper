@@ -19,14 +19,26 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "startRoute": "home",
   "showEmptyState": false,
   "simulateScraping": false,
+  "simulateEnrichment": false,
   "compactSidebar": false
 }/*EDITMODE-END*/;
+
+// Map a sidebar id ('gmaps' / 'yelp' / 'linkedin') to a campaign-list route.
+const SIDEBAR_TO_SOURCE = { gmaps: 'gmaps', yelp: 'yelp', linkedin: 'linkedin' };
+const SOURCE_TO_SIDEBAR = { gmaps: 'gmaps', yelp: 'yelp', linkedin: 'linkedin' };
 
 function App() {
   const [dark, setDark] = useDarkMode();
   const [collapsed, setCollapsed] = useState(false);
   const [campaigns, setCampaigns] = useState(seedCampaigns);
-  const [leadsByCampaign, setLeadsByCampaign] = useState({ c1: seedLeads });
+  // Leads are stored per-campaign so the table only ever renders the right
+  // shape. Yelp + LinkedIn leads have different fields from gmaps leads;
+  // the detail page picks the right LeadRow* variant based on campaign.source.
+  const [leadsByCampaign, setLeadsByCampaign] = useState({
+    c1:  seedLeads,
+    y1:  seedLeadsYelp,
+    ln1: seedLeadsLinkedIn,
+  });
 
   // Modal state
   const [createOpen, setCreateOpen] = useState(false);
@@ -38,13 +50,24 @@ function App() {
   const [scrapingFound, setScrapingFound] = useState(0);
   const scrapingTimerRef = useRef(null);
 
+  // Enrichment — which campaign the active run targets, and which leads
+  // just had their email landed (used to flash the row + email cell).
+  const [enrichmentCampaignId, setEnrichmentCampaignId] = useState(null);
+  const [justFoundIds, setJustFoundIds] = useState(new Set());
+  const justFoundTimersRef = useRef(new Map());
+
   const toast = useToast();
 
   // Tweaks
   const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
 
-  // Route — initial value derived from "startRoute" tweak so we can preview either page
-  const [route, setRoute] = useState(() => ({ name: t.startRoute === 'list' ? 'list' : 'home' }));
+  // Route. shape:
+  //   { name: 'home' }
+  //   { name: 'list',   source: 'gmaps'|'yelp'|'linkedin' }
+  //   { name: 'detail', source: 'gmaps'|'yelp'|'linkedin', id: 'c1' }
+  const [route, setRoute] = useState(() => (
+    t.startRoute === 'list' ? { name: 'list', source: 'gmaps' } : { name: 'home' }
+  ));
 
   // React to "simulateScraping" tweak
   useEffect(() => {
@@ -57,6 +80,125 @@ function App() {
   }, [t.simulateScraping, route]);
 
   useEffect(() => { setCollapsed(!!t.compactSidebar); }, [t.compactSidebar]);
+
+  // Enrichment engine — driven by the simulator hook from enrichment.jsx.
+  // The hook is the source of truth for run state; we react to its callbacks
+  // by writing emails into leadsByCampaign and toasting on completion.
+  const getLeadById = (id) => {
+    for (const cid of Object.keys(leadsByCampaign)) {
+      const found = leadsByCampaign[cid].find((l) => l.id === id);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  const markJustFound = (leadId) => {
+    setJustFoundIds((prev) => {
+      const next = new Set(prev); next.add(leadId); return next;
+    });
+    // Clear the highlight after the CSS animation finishes so the row
+    // returns to its normal background.
+    const prevTimer = justFoundTimersRef.current.get(leadId);
+    if (prevTimer) clearTimeout(prevTimer);
+    const handle = setTimeout(() => {
+      setJustFoundIds((prev) => {
+        const next = new Set(prev); next.delete(leadId); return next;
+      });
+      justFoundTimersRef.current.delete(leadId);
+    }, 2200);
+    justFoundTimersRef.current.set(leadId, handle);
+  };
+
+  const { run: enrichRun, elapsedMs: enrichElapsedMs, startRun: startEnrichRun, cancelRun: cancelEnrichRun } =
+    (window.useEnrichmentSimulator || (() => ({})))({
+      getLeadById,
+      onFound: (leadId, email) => {
+        setLeadsByCampaign((prev) => {
+          const out = { ...prev };
+          for (const cid of Object.keys(out)) {
+            out[cid] = out[cid].map((l) => l.id === leadId ? { ...l, email } : l);
+          }
+          return out;
+        });
+        markJustFound(leadId);
+      },
+      onComplete: ({ found, failed, skipped, total, durationMs }) => {
+        setEnrichmentCampaignId(null);
+        setTweak('simulateEnrichment', false);
+        const time = window.formatRunDuration ? window.formatRunDuration(durationMs) : '';
+        if (found === 0 && failed === 0 && skipped > 0) {
+          toast.show({ type: 'warning', title: 'No leads to enrich', message: 'All selected leads already had an email.' });
+        } else if (found === 0) {
+          toast.show({ type: 'warning', title: 'Enrichment complete', message: `Couldn’t find emails for ${failed} lead${failed === 1 ? '' : 's'}. Try again or add manually.` });
+        } else {
+          toast.show({
+            type: 'success',
+            title: `Found ${found} email${found === 1 ? '' : 's'}`,
+            message: `${found} of ${total} leads enriched in ${time}. ${failed} missed${skipped ? ` · ${skipped} skipped` : ''}.`,
+          });
+        }
+      },
+      onCancel: ({ found, durationMs }) => {
+        setEnrichmentCampaignId(null);
+        setTweak('simulateEnrichment', false);
+        const time = window.formatRunDuration ? window.formatRunDuration(durationMs) : '';
+        toast.show({
+          type: 'warning',
+          title: 'Enrichment stopped',
+          message: `Cancelled at ${time}. Kept ${found} email${found === 1 ? '' : 's'} found so far.`
+        });
+      },
+    });
+
+  // Entry point used by both single (Email modal “Find Email”) and bulk
+  // (floating pill “Find email”) flows. Mirrors the POST /api/enrich
+  // pre-flight from §12 of the phase doc: filter out leads that already
+  // have an email, count the removed as upfront-skipped, 409-equivalent
+  // if nothing remains.
+  const findEmailsForLeads = (leadIds) => {
+    if (enrichRun) {
+      toast.show({ type: 'warning', title: 'Enrichment already running', message: 'Wait for the current run to finish or stop it first.' });
+      return;
+    }
+    if (!leadIds || !leadIds.length) return;
+    const eligible = [];
+    let skippedUpfront = 0;
+    leadIds.forEach((id) => {
+      const lead = getLeadById(id);
+      if (!lead) return;
+      if (lead.email) skippedUpfront += 1;
+      else eligible.push(id);
+    });
+    if (!eligible.length) {
+      toast.show({ type: 'warning', title: 'Nothing to enrich', message: 'All selected leads already have an email.' });
+      return;
+    }
+    // Find which campaign owns these leads (the active detail page).
+    let owningCampaignId = null;
+    for (const cid of Object.keys(leadsByCampaign)) {
+      if (leadsByCampaign[cid].some((l) => eligible.includes(l.id))) { owningCampaignId = cid; break; }
+    }
+    setEnrichmentCampaignId(owningCampaignId);
+    const entryName = eligible.length === 1 ? (getLeadById(eligible[0])?.name || '') : '';
+    startEnrichRun({ leadIds: eligible, skippedUpfront, entryLeadName: entryName });
+  };
+
+  // React to the Tweaks “Simulate enrichment” toggle — mirror the
+  // simulateScraping pattern. Picks ~12 leads in the currently visible
+  // campaign that don’t yet have an email and runs them through.
+  useEffect(() => {
+    if (t.simulateEnrichment && !enrichRun && route.name === 'detail') {
+      const c = campaigns.find((x) => x.id === route.id);
+      if (!c || c.source !== 'gmaps') { setTweak('simulateEnrichment', false); return; }
+      const candidates = (leadsByCampaign[c.id] || []).filter((l) => !l.email).slice(0, 12);
+      if (!candidates.length) {
+        toast.show({ type: 'warning', title: 'Nothing to enrich', message: 'Every lead in this campaign already has an email.' });
+        setTweak('simulateEnrichment', false);
+        return;
+      }
+      findEmailsForLeads(candidates.map((l) => l.id));
+    }
+  }, [t.simulateEnrichment, route]);
 
   // Publish sidebar width as a CSS variable so the floating bulk-action pill
   // can center itself against the content area, not the viewport.
@@ -88,9 +230,21 @@ function App() {
 
   // Navigation
   const goHome     = () => setRoute({ name: 'home' });
-  const goList     = () => setRoute({ name: 'list' });
-  const goDetail   = (c) => setRoute({ name: 'detail', id: typeof c === 'string' ? c : c.id });
-  const handleNav = (id) => id === 'home' ? goHome() : goList();
+  const goList     = (source = 'gmaps') => setRoute({ name: 'list', source });
+  const goDetail   = (c) => {
+    // accept either a campaign object or just an id
+    if (typeof c === 'string') {
+      const found = campaigns.find((x) => x.id === c);
+      setRoute({ name: 'detail', source: found?.source || 'gmaps', id: c });
+    } else {
+      setRoute({ name: 'detail', source: c.source || 'gmaps', id: c.id });
+    }
+  };
+  const handleNav = (id) => {
+    if (id === 'home') return goHome();
+    const source = SIDEBAR_TO_SOURCE[id];
+    if (source) return goList(source);
+  };
 
   // Campaign mutations
   const openRunModal = (c) => setRunModal(c);
@@ -108,10 +262,12 @@ function App() {
   };
 
   const createCampaign = (data) => {
+    const source = data.source || (route.name === 'list' || route.name === 'detail' ? route.source : 'gmaps') || 'gmaps';
     const newC = {
-      id: 'c' + (campaigns.length + 1 + Math.floor(Math.random() * 1000)),
+      id: (source === 'yelp' ? 'y' : source === 'linkedin' ? 'ln' : 'c') + (campaigns.length + 1 + Math.floor(Math.random() * 1000)),
+      source,
       ...data,
-      notifyEmail: '',
+      notifyEmail: data.notifyEmail || '',
       status: 'ACTIVE',
       totalLeads: 0, contacted: 0, newSinceLast: 0,
       lastRun: 'never',
@@ -119,7 +275,7 @@ function App() {
     };
     setCampaigns(cs => [newC, ...cs]);
     setCreateOpen(false);
-    toast.show({ type: 'success', title: 'Campaign created', message: `"${newC.name}" is ready. Hit Run to scrape leads.` });
+    toast.show({ type: 'success', title: 'Campaign created', message: `"${newC.name}" is ready. Hit Run to scrape ${SOURCES[source].leadEntity}.` });
   };
 
   const saveCampaignEdit = (updated) => {
@@ -175,12 +331,16 @@ function App() {
   // Derived
   const currentCampaign = route.name === 'detail' ? campaigns.find(c => c.id === route.id) : null;
   const currentLeads = route.name === 'detail' ? (leadsByCampaign[route.id] || []) : [];
-  const sidebarActive = route.name === 'home' ? 'home' : 'gmaps';
+  const currentSource = route.source || 'gmaps';
+  const sidebarActive = route.name === 'home' ? 'home' : SOURCE_TO_SIDEBAR[currentSource] || 'gmaps';
+  const visibleCampaigns = (route.name === 'list' || route.name === 'detail')
+    ? campaigns.filter((c) => (c.source || 'gmaps') === currentSource)
+    : campaigns;
 
   const breadcrumb =
     route.name === 'home'   ? ['Outrich Manager'] :
-    route.name === 'list'   ? ['Google Maps Scraper', 'Campaigns'] :
-    /* detail */              ['Google Maps Scraper', 'Campaigns', currentCampaign?.name || ''];
+    route.name === 'list'   ? [SOURCES[currentSource].breadcrumb, 'Campaigns'] :
+    /* detail */              [SOURCES[currentSource].breadcrumb, 'Campaigns', currentCampaign?.name || ''];
 
   return (
     <div className="min-h-screen flex bg-canvas-soft dark:bg-d-canvas-soft text-ink dark:text-d-ink">
@@ -204,11 +364,12 @@ function App() {
               closedLeads={closedLeads}
               campaigns={campaigns}
               onOpenCampaign={(id) => goDetail(id)}
-              onGoToScraper={goList}
+              onGoToScraper={() => goList('gmaps')}
             />
           ) : t.showEmptyState ? (
             <CampaignListPage
               campaigns={[]}
+              source={currentSource}
               onCreate={() => setCreateOpen(true)}
               emptyState
               onOpen={goDetail}
@@ -219,7 +380,8 @@ function App() {
             />
           ) : route.name === 'list' ? (
             <CampaignListPage
-              campaigns={campaigns}
+              campaigns={visibleCampaigns}
+              source={currentSource}
               onOpen={goDetail}
               onRun={openRunModal}
               onCreate={() => setCreateOpen(true)}
@@ -231,9 +393,9 @@ function App() {
             <CampaignDetailPage
               campaign={currentCampaign}
               leads={currentLeads}
-              onBack={goList}
+              onBack={() => goList(currentCampaign.source || 'gmaps')}
               onRun={() => openRunModal(currentCampaign)}
-              onArchive={() => { archiveCampaign(currentCampaign); goList(); }}
+              onArchive={() => { archiveCampaign(currentCampaign); goList(currentCampaign.source || 'gmaps'); }}
               onEdit={() => setEditingCampaign(currentCampaign)}
               scraping={scrapingCampaignId === currentCampaign.id}
               scrapingFound={scrapingFound}
@@ -242,9 +404,14 @@ function App() {
               onLeadNotesChange={updateLeadNotes}
               onLeadEmailChange={updateLeadEmail}
               onExport={exportCSV}
+              enrichRun={enrichmentCampaignId === currentCampaign.id ? enrichRun : null}
+              enrichElapsedMs={enrichElapsedMs}
+              enrichJustFound={justFoundIds}
+              onFindEmails={findEmailsForLeads}
+              onStopEnrich={cancelEnrichRun}
             />
           ) : (
-            <div className="px-8 py-24 text-center text-mute">Campaign not found. <button className="text-ink dark:text-d-ink underline" onClick={goList}>Back to campaigns</button></div>
+            <div className="px-8 py-24 text-center text-mute">Campaign not found. <button className="text-ink dark:text-d-ink underline" onClick={() => goList('gmaps')}>Back to campaigns</button></div>
           )}
         </main>
       </div>
@@ -252,6 +419,7 @@ function App() {
       {/* Modals */}
       <CreateCampaignModal
         open={createOpen}
+        source={currentSource}
         onClose={() => setCreateOpen(false)}
         onCreate={createCampaign}
       />
@@ -277,7 +445,7 @@ function App() {
               label="Start on"
               value={route.name === 'home' ? 'home' : 'list'}
               options={[{ value: 'home', label: 'Manager' }, { value: 'list', label: 'Scraper' }]}
-              onChange={(v) => { setTweak('startRoute', v); setRoute({ name: v }); }}
+              onChange={(v) => { setTweak('startRoute', v); setRoute(v === 'home' ? { name: 'home' } : { name: 'list', source: 'gmaps' }); }}
             />
             <TweakToggle
               label="Compact sidebar"
@@ -295,6 +463,11 @@ function App() {
               label="Simulate scraping"
               value={t.simulateScraping}
               onChange={(v) => setTweak('simulateScraping', v)}
+            />
+            <TweakToggle
+              label="Simulate email enrichment"
+              value={t.simulateEnrichment}
+              onChange={(v) => setTweak('simulateEnrichment', v)}
             />
           </TweakSection>
           <TweakSection label="Theme">

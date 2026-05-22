@@ -1,8 +1,10 @@
-import type { ScrapeRun } from "@prisma/client";
+import type { EnrichmentRun, ScrapeRun } from "@prisma/client";
 import { BlockedError } from "./block-detection.js";
 import { CancelledError } from "./dedupe.js";
 import { db } from "./db.js";
 import { logger } from "./logger.js";
+import { enrichLeads, writeLeadEmail } from "./enrich.js";
+import type { LeadForEnrichment } from "./enrich.js";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -31,22 +33,41 @@ function pickUserAgent(): string {
 
 // On startup: reap any runs left RUNNING from a previous crashed worker.
 export async function reapOrphanRuns(): Promise<void> {
-  const result = await db.scrapeRun.updateMany({
-    where: { status: "RUNNING" },
-    data: {
-      status:       "FAILED",
-      finishedAt:   new Date(),
-      errorMessage: "Worker crashed or restarted before this run completed",
-    },
-  });
-  if (result.count > 0) {
-    logger.info("reaped orphan runs", { count: result.count });
+  const [scrapeResult, enrichResult] = await Promise.all([
+    db.scrapeRun.updateMany({
+      where: { status: "RUNNING" },
+      data: {
+        status:       "FAILED",
+        finishedAt:   new Date(),
+        errorMessage: "Worker crashed or restarted before this run completed",
+      },
+    }),
+    db.enrichmentRun.updateMany({
+      where: { status: "RUNNING" },
+      data: {
+        status:       "FAILED",
+        finishedAt:   new Date(),
+        errorMessage: "Worker crashed or restarted before this run completed",
+      },
+    }),
+  ]);
+  const total = scrapeResult.count + enrichResult.count;
+  if (total > 0) {
+    logger.info("reaped orphan runs", { scrape: scrapeResult.count, enrich: enrichResult.count });
   }
 }
 
-// Atomically claims the next PENDING scrape_run for this worker.
-async function claimNextJob(): Promise<ScrapeRun | null> {
-  const rows = await db.$queryRaw<{ id: string }[]>`
+type JobClaim =
+  | { type: "scrape";     job: ScrapeRun }
+  | { type: "enrichment"; job: EnrichmentRun };
+
+/**
+ * Atomically claims the oldest PENDING job of either type.
+ * Uses FOR UPDATE SKIP LOCKED on each table separately, then picks the older one.
+ */
+async function claimNextJob(): Promise<JobClaim | null> {
+  // Claim one pending scrape run
+  const scrapeRows = await db.$queryRaw<{ id: string; created_at: Date }[]>`
     UPDATE scrape_runs
     SET    status     = 'RUNNING',
            started_at = NOW()
@@ -58,11 +79,58 @@ async function claimNextJob(): Promise<ScrapeRun | null> {
       LIMIT  1
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id
+    RETURNING id, created_at
   `;
-  const claimed = rows[0];
-  if (!claimed) return null;
-  return db.scrapeRun.findUnique({ where: { id: claimed.id } });
+
+  // Claim one pending enrichment run
+  const enrichRows = await db.$queryRaw<{ id: string; created_at: Date }[]>`
+    UPDATE enrichment_runs
+    SET    status     = 'RUNNING',
+           started_at = NOW()
+    WHERE  id = (
+      SELECT id
+      FROM   enrichment_runs
+      WHERE  status = 'PENDING'
+      ORDER  BY created_at ASC
+      LIMIT  1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING id, created_at
+  `;
+
+  const scrape  = scrapeRows[0];
+  const enrich  = enrichRows[0];
+
+  if (!scrape && !enrich) return null;
+
+  // If both claimed, release the newer one — process the older first
+  if (scrape && enrich) {
+    if (scrape.created_at <= enrich.created_at) {
+      // Release the enrichment claim back to PENDING
+      await db.enrichmentRun.update({
+        where: { id: enrich.id },
+        data:  { status: "PENDING", startedAt: null },
+      });
+      const job = await db.scrapeRun.findUnique({ where: { id: scrape.id } });
+      return job ? { type: "scrape", job } : null;
+    } else {
+      // Release the scrape claim back to PENDING
+      await db.scrapeRun.update({
+        where: { id: scrape.id },
+        data:  { status: "PENDING", startedAt: null },
+      });
+      const job = await db.enrichmentRun.findUnique({ where: { id: enrich.id } });
+      return job ? { type: "enrichment", job } : null;
+    }
+  }
+
+  if (scrape) {
+    const job = await db.scrapeRun.findUnique({ where: { id: scrape.id } });
+    return job ? { type: "scrape", job } : null;
+  }
+
+  const job = await db.enrichmentRun.findUnique({ where: { id: enrich!.id } });
+  return job ? { type: "enrichment", job } : null;
 }
 
 async function markCompleted(runId: string, durationSec: number) {
@@ -141,15 +209,125 @@ export async function processJob(job: ScrapeRun) {
   }
 }
 
+// ── Enrichment job processor (§13) ──────────────────────────────────────────
+
+export async function processEnrichmentJob(job: EnrichmentRun): Promise<void> {
+  const startedAt = Date.now();
+  logger.info("enrichment job started", { runId: job.id, totalLeads: job.totalLeads });
+
+  try {
+    // Load the worklist leads from DB; some may have gained an email since queue time
+    const rawLeads = await db.lead.findMany({
+      where:  { id: { in: job.leadIds } },
+      select: { id: true, normalizedDomain: true, email: true },
+    });
+
+    // Leads that already have an email since queue time count as skipped
+    const leads: LeadForEnrichment[] = rawLeads.map((l) => ({
+      id:               l.id,
+      normalizedDomain: l.normalizedDomain,
+      email:            l.email,
+    }));
+
+    const upfrontSkipped = leads.filter((l) => l.email !== null).length;
+    if (upfrontSkipped > 0) {
+      await db.enrichmentRun.update({
+        where: { id: job.id },
+        data:  { skippedCount: { increment: upfrontSkipped } },
+      });
+    }
+
+    // Leads that still need enrichment
+    const toProcess = leads.filter((l) => l.email === null);
+
+    let foundCount     = 0;
+    let failedCount    = 0;
+    let skippedCount   = upfrontSkipped;
+    let processedCount = 0;
+
+    await enrichLeads(
+      toProcess,
+      async ({ leadId, email, skipped }) => {
+        if (skipped) {
+          skippedCount++;
+        } else {
+          processedCount++;
+          if (email) {
+            foundCount++;
+            await writeLeadEmail(leadId, email);
+          } else {
+            failedCount++;
+          }
+        }
+
+        // Update run counters immediately after each lead
+        await db.enrichmentRun.update({
+          where: { id: job.id },
+          data:  {
+            processedCount,
+            foundCount,
+            failedCount,
+            skippedCount,
+          },
+        });
+      },
+      // Cancellation check — called between batches
+      async () => {
+        const current = await db.enrichmentRun.findUnique({
+          where:  { id: job.id },
+          select: { status: true },
+        });
+        return current?.status === "CANCELLED";
+      },
+    );
+
+    const durationSec = Math.round((Date.now() - startedAt) / 1000);
+    await db.enrichmentRun.update({
+      where: { id: job.id },
+      data:  { status: "COMPLETED", finishedAt: new Date(), durationSec },
+    });
+    logger.info("enrichment complete", {
+      runId: job.id,
+      found: foundCount,
+      failed: failedCount,
+      skipped: skippedCount,
+      total: job.totalLeads,
+      durationSec,
+    });
+
+  } catch (err) {
+    const durationSec = Math.round((Date.now() - startedAt) / 1000);
+
+    if (err instanceof CancelledError) {
+      logger.info("enrichment cancelled", { runId: job.id, durationSec });
+      await db.enrichmentRun.update({
+        where: { id: job.id },
+        data:  { durationSec },
+      });
+    } else {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("enrichment failed", { runId: job.id, error: message });
+      await db.enrichmentRun.update({
+        where: { id: job.id },
+        data:  { status: "FAILED", finishedAt: new Date(), durationSec, errorMessage: message },
+      });
+    }
+  }
+}
+
 export async function runWorkerLoop(): Promise<never> {
   logger.info("worker loop started — polling every 2 s");
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      const job = await claimNextJob();
-      if (job) {
-        await processJob(job);
+      const claim = await claimNextJob();
+      if (claim) {
+        if (claim.type === "scrape") {
+          await processJob(claim.job);
+        } else {
+          await processEnrichmentJob(claim.job);
+        }
       } else {
         await sleep(POLL_INTERVAL_MS);
       }

@@ -2,6 +2,9 @@
 import { EditCampaignModal } from "@/components/campaigns/edit-campaign-modal";
 import { RunCampaignModal } from "@/components/campaigns/run-campaign-modal";
 import { EmailModal } from "@/components/leads/email-modal";
+import { EnrichmentBanner, SearchingPill } from "@/components/leads/enrichment-banner";
+import type { EnrichStatus } from "@/components/leads/enrichment-banner";
+import { LeadEditModal } from "@/components/leads/lead-edit-modal";
 import { NotesModal } from "@/components/leads/notes-modal";
 import { Badge } from "@/components/ui/badge";
 import { BulkActionsBar } from "@/components/ui/bulk-actions-bar";
@@ -19,7 +22,7 @@ import { useToast } from "@/components/ui/toast";
 import { STATUS_OPTIONS } from "@/lib/constants";
 import type { Campaign, Lead, ScrapeRun } from "@prisma/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Loader2, Mail, MapPin, Pencil, Phone, Play, Sparkles, Square, Trash2, User } from "lucide-react";
+import { Archive, ArrowDown, ArrowUp, ArrowUpDown, Check, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, CircleDot, Download, Filter, Loader2, Mail, MapPin, Pencil, Phone, Play, Sparkles, Square, Trash2, User } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -79,12 +82,15 @@ type CampaignWithStats = Campaign & { stats: LeadStats };
 
 function LeadRow({
   lead, selected, onToggle, onStatusChange, onEditNotes, onEditEmail,
+  searching, justFound,
 }: {
   lead: Lead; selected: boolean;
   onToggle: (on: boolean) => void;
   onStatusChange: (status: string) => void;
   onEditNotes: () => void;
   onEditEmail: () => void;
+  searching?: boolean;
+  justFound?: boolean;
 }) {
   const [statusOpen, setStatusOpen] = React.useState(false);
   const [coords, setCoords] = React.useState<{ top: number; left: number } | null>(null);
@@ -135,10 +141,18 @@ function LeadRow({
         {lead.email ? (
           <button
             onClick={onEditEmail}
-            className="inline-flex items-center gap-1.5 text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink truncate max-w-[180px]"
+            className={`inline-flex items-center gap-1.5 truncate max-w-[180px] ${
+              justFound
+                ? "text-ink dark:text-d-ink font-medium"
+                : "text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink"
+            }`}
           >
-            <Mail size={12} className="text-mute shrink-0" /><span className="truncate">{lead.email}</span>
+            <Mail size={12} className={justFound ? "text-primary shrink-0" : "text-mute shrink-0"} />
+            <span className="truncate">{lead.email}</span>
+            {justFound && <Sparkles size={11} className="text-positive shrink-0" />}
           </button>
+        ) : searching ? (
+          <SearchingPill />
         ) : (
           <button
             onClick={onEditEmail}
@@ -202,12 +216,10 @@ function LeadRow({
   );
 }
 
-// A plain stopwatch. It starts the moment `running` flips true, ticks every
-// second, and freezes when `running` flips false. The start time lives in a
-// ref so it survives every re-render (polling, lead inserts) untouched — the
-// timer is purely a clock, with no link to leads or the scrape itself.
-// Returns the elapsed time formatted as "M:SS".
-function useStopwatch(running: boolean): string {
+// A plain stopwatch. Returns elapsed seconds. Starts when `running` flips
+// true, resets when it flips false. The start time is in a ref so it survives
+// re-renders (polling, lead inserts) untouched.
+function useStopwatch(running: boolean): number {
   const startRef = React.useRef<number | null>(null);
   const [elapsedSec, setElapsedSec] = React.useState(0);
 
@@ -217,7 +229,6 @@ function useStopwatch(running: boolean): string {
       setElapsedSec(0);
       return;
     }
-    // Run just started — capture the baseline once.
     startRef.current = Date.now();
     setElapsedSec(0);
     const t = setInterval(() => {
@@ -228,9 +239,13 @@ function useStopwatch(running: boolean): string {
     return () => clearInterval(t);
   }, [running]);
 
-  const mins = Math.floor(elapsedSec / 60);
-  const secs = elapsedSec % 60;
-  return `${mins}:${String(secs).padStart(2, "0")}`;
+  return elapsedSec;
+}
+
+function fmtElapsed(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function ScrapingBanner({ run }: { run: RunStatus }) {
@@ -303,7 +318,7 @@ function toRunEntries(runs: ScrapeRun[]): RunEntry[] {
     status:      r.status as RunEntry["status"],
     newLeads:    r.newLeadsCount,
     dupes:       r.duplicateCount,
-    durationMin: r.durationSec != null ? Math.round(r.durationSec / 60) || null : null,
+    durationSec: r.durationSec ?? null,
     error:       r.errorMessage,
   }));
 }
@@ -346,6 +361,23 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
   // Declared early so the campaign query can reference it for refetchInterval
   const [activeRunId, setActiveRunId] = React.useState<string | null>(null);
 
+  // Enrichment run state — mirrors the scrape run state machine
+  const [activeEnrichId, setActiveEnrichId] = React.useState<string | null>(null);
+  // Set of lead IDs whose email just landed (cleared after 2.2 s for the flash)
+  const [justFoundIds, setJustFoundIds]     = React.useState<Set<string>>(new Set());
+  const justFoundTimers = React.useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const markJustFound = React.useCallback((leadId: string) => {
+    setJustFoundIds((prev) => { const n = new Set(prev); n.add(leadId); return n; });
+    const prev = justFoundTimers.current.get(leadId);
+    if (prev) clearTimeout(prev);
+    const h = setTimeout(() => {
+      setJustFoundIds((p) => { const n = new Set(p); n.delete(leadId); return n; });
+      justFoundTimers.current.delete(leadId);
+    }, 2200);
+    justFoundTimers.current.set(leadId, h);
+  }, []);
+
   const { data: campaign, isLoading: campaignLoading } = useQuery<CampaignWithStats>({
     queryKey: ["campaign", id],
     queryFn: () => fetch(`/api/campaigns/${id}`).then((r) => { if (!r.ok) throw new Error("Not found"); return r.json(); }),
@@ -372,8 +404,8 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
       return fetch(`/api/campaigns/${id}/leads?${sp.toString()}`).then((r) => r.json());
     },
     enabled: !!campaign,
-    // Refetch every 3 s while a scrape is active so the table fills in real-time
-    refetchInterval: activeRunId ? 3000 : false,
+    // Poll while a scrape OR enrichment is active so the table fills in real-time
+    refetchInterval: (activeRunId || activeEnrichId) ? 3000 : false,
   });
 
   const { data: scrapeRuns = [] } = useQuery<ScrapeRun[]>({
@@ -390,6 +422,74 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
     const active = scrapeRuns.find((r) => r.status === "PENDING" || r.status === "RUNNING");
     if (active && !activeRunId) setActiveRunId(active.id);
   }, [scrapeRuns, activeRunId]);
+
+  // Poll the active enrichment run at 3 s intervals
+  const { data: activeEnrich } = useQuery<EnrichStatus>({
+    queryKey: ["activeEnrich", activeEnrichId],
+    queryFn:  () => fetch(`/api/enrich/${activeEnrichId}`).then((r) => r.json()),
+    enabled:  !!activeEnrichId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "PENDING" || status === "RUNNING" ? 3000 : false;
+    },
+  });
+
+  // Track previous lead emails to detect newly-landed ones and flash them
+  const prevEmailsRef = React.useRef<Map<string, string | null>>(new Map());
+  React.useEffect(() => {
+    if (!activeEnrichId) return;
+    leads.forEach((l) => {
+      const prev = prevEmailsRef.current.get(l.id);
+      if (l.email && prev !== l.email) {
+        // Email arrived (or changed) while enrichment is active — flash it
+        if (prev !== undefined) markJustFound(l.id);
+      }
+      prevEmailsRef.current.set(l.id, l.email);
+    });
+  }, [leads, activeEnrichId, markJustFound]);
+
+  // React to enrichment run completion
+  const prevEnrichStatusRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!activeEnrich) return;
+    const prev = prevEnrichStatusRef.current;
+    prevEnrichStatusRef.current = activeEnrich.status;
+
+    if (prev !== "COMPLETED" && activeEnrich.status === "COMPLETED") {
+      const { foundCount, failedCount, totalLeads } = activeEnrich;
+      if (foundCount === 0 && failedCount === 0) {
+        toast.show({ type: "warning", title: "Nothing to enrich", message: "All selected leads already had an email." });
+      } else if (foundCount === 0) {
+        toast.show({ type: "warning", title: "Enrichment complete", message: `Couldn't find emails for ${failedCount} lead${failedCount === 1 ? "" : "s"}. Try again or add manually.` });
+      } else {
+        toast.show({
+          type: "success",
+          title: `Found ${foundCount} email${foundCount === 1 ? "" : "s"}`,
+          message: `${foundCount} of ${totalLeads} leads enriched. ${failedCount} missed.`,
+        });
+      }
+      qc.invalidateQueries({ queryKey: ["leads", id] });
+      prevEmailsRef.current.clear();
+      setActiveEnrichId(null);
+    }
+
+    if (prev !== "FAILED" && activeEnrich.status === "FAILED") {
+      toast.show({ type: "error", title: "Enrichment failed", message: activeEnrich.errorMessage ?? "Unknown error" });
+      setActiveEnrichId(null);
+    }
+
+    if (prev !== "CANCELLED" && activeEnrich.status === "CANCELLED") {
+      const { foundCount } = activeEnrich;
+      toast.show({
+        type: "warning",
+        title: "Enrichment stopped",
+        message: `Cancelled. Kept ${foundCount} email${foundCount === 1 ? "" : "s"} found so far.`,
+      });
+      qc.invalidateQueries({ queryKey: ["leads", id] });
+      prevEmailsRef.current.clear();
+      setActiveEnrichId(null);
+    }
+  }, [activeEnrich, id, qc, toast]);
 
   // Poll the active run at 3 s intervals while it's in progress
   const { data: activeRun } = useQuery<RunStatus>({
@@ -442,6 +542,40 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
     // UI will update via the polling effect when it sees CANCELLED status
   };
 
+  const isEnriching = !!activeEnrichId && (activeEnrich?.status === "PENDING" || activeEnrich?.status === "RUNNING");
+  const enrichElapsedSec = useStopwatch(isEnriching);
+
+  const handleFindEmails = async (leadIds: string[], force = false) => {
+    if (!campaign) return;
+    if (isEnriching) {
+      toast.show({ type: "warning", title: "Enrichment already running", message: "Wait for the current run to finish or stop it first." });
+      return;
+    }
+    const res = await fetch("/api/enrich", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ campaignId: id, leadIds, force }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        toast.show({ type: "warning", title: "Nothing to enrich", message: data.error ?? "All selected leads already have an email." });
+      } else {
+        toast.show({ type: "error", title: "Could not start enrichment", message: data.error ?? "Unknown error" });
+      }
+      return;
+    }
+    const { runId } = await res.json();
+    prevEmailsRef.current.clear();
+    leads.forEach((l) => prevEmailsRef.current.set(l.id, l.email));
+    setActiveEnrichId(runId);
+  };
+
+  const handleStopEnrich = async () => {
+    if (!activeEnrichId) return;
+    await fetch(`/api/enrich/${activeEnrichId}/cancel`, { method: "POST" });
+  };
+
   const [editOpen, setEditOpen] = React.useState(false);
   const [runOpen, setRunOpen] = React.useState(false);
   const [selected, setSelected] = React.useState(new Set<string>());
@@ -449,6 +583,7 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
   // Slice 4.2 / 4.3 — which lead's notes / email modal is open
   const [notesLead, setNotesLead] = React.useState<Lead | null>(null);
   const [emailLead, setEmailLead] = React.useState<Lead | null>(null);
+  const [editLead,  setEditLead]  = React.useState<Lead | null>(null);
 
   // Slice 4.9 — bulk delete confirmation modal
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
@@ -461,8 +596,7 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
 
   const isRunning = !!activeRunId && (activeRun?.status === "PENDING" || activeRun?.status === "RUNNING");
 
-  // Plain stopwatch shown in the Stop button — starts/stops with the run.
-  const elapsed = useStopwatch(isRunning);
+  const elapsedSec   = useStopwatch(isRunning);
 
   // A search term or a non-ALL status filter means the list is narrowed.
   const isFiltered = debouncedSearch !== "" || statusFilter !== "ALL";
@@ -575,6 +709,22 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
       message: email ? `Set email for ${lead.businessName}.` : `Removed email from ${lead.businessName}.`,
     });
     setEmailLead(null);
+  };
+
+  // ── Edit full lead row ────────────────────────────────────────────────────
+  const handleSaveLead = async (lead: Lead, fields: Record<string, string | undefined>) => {
+    const res = await fetch(`/api/leads/${lead.id}`, {
+      method:  "PUT",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(fields),
+    });
+    if (!res.ok) {
+      toast.show({ type: "error", title: "Save failed", message: "Could not update the lead." });
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["leads", id] });
+    toast.show({ type: "success", title: "Lead updated", message: `Saved changes for ${lead.businessName}.` });
+    setEditLead(null);
   };
 
   // ── Slice 4.10 — CSV export. Builds the URL for the chosen scope and
@@ -691,7 +841,7 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
               leftIcon={<Square size={14} />}
               onClick={handleStop}
             >
-              Stop <span className="tabular-nums font-normal opacity-90">{elapsed}</span>
+              Stop <span className="tabular-nums font-normal opacity-90">{fmtElapsed(elapsedSec)}</span>
             </Button>
           )}
           <Menu
@@ -714,6 +864,16 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
 
       {/* Scraping banner */}
       {activeRun && <ScrapingBanner run={activeRun} />}
+
+      {/* Enrichment banner — shown while an enrichment run is active */}
+      {activeEnrich && (activeEnrich.status === "PENDING" || activeEnrich.status === "RUNNING") && (
+        <EnrichmentBanner
+          run={activeEnrich}
+          elapsedSec={enrichElapsedSec}
+          currentLeadName={undefined}
+          onStop={handleStopEnrich}
+        />
+      )}
 
       {/* Stat cards */}
       <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -779,6 +939,7 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
                   onStatusChange={(s) => handleStatusChange(l, s)}
                   onEditNotes={() => setNotesLead(l)}
                   onEditEmail={() => setEmailLead(l)}
+                  justFound={justFoundIds.has(l.id)}
                 />
               ))}
               {pageRows.length === 0 && (
@@ -849,15 +1010,26 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
         onClear={() => setSelected(new Set())}
         actions={[
           {
-            type: "menu", label: "Set status",
+            type: "menu", label: "Set status", icon: <CircleDot size={14} />,
             items: STATUS_OPTIONS.map((s) => ({
               label: s.label,
               onClick: () => handleBulkStatus(s.value),
             })),
           },
           { type: "divider" },
+          { type: "button", label: "Find Email", icon: <Mail size={14} />, onClick: () => { handleFindEmails([...selected]); setSelected(new Set()); } },
+          { type: "divider" },
           { type: "button", label: "Export", icon: <Download size={14} />, onClick: () => handleExport("selected") },
           { type: "divider" },
+          // Edit is only meaningful for a single lead
+          {
+            type: "button", label: "Edit", icon: <Pencil size={14} />, showOnCount: 1,
+            onClick: () => {
+              const lead = leads.find((l) => l.id === [...selected][0]);
+              if (lead) setEditLead(lead);
+            },
+          },
+          { type: "divider", showOnCount: 1 },
           { type: "button", label: "Delete", icon: <Trash2 size={14} />, danger: true, onClick: () => setBulkDeleteOpen(true) },
         ]}
       />
@@ -889,6 +1061,14 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
         lead={emailLead}
         onClose={() => setEmailLead(null)}
         onSave={(email) => { if (emailLead) return handleSaveEmail(emailLead, email); }}
+        onFindEmail={emailLead ? () => { handleFindEmails([emailLead.id], !!emailLead.email); setEmailLead(null); } : undefined}
+      />
+
+      <LeadEditModal
+        open={!!editLead}
+        lead={editLead}
+        onClose={() => setEditLead(null)}
+        onSave={(fields) => { if (editLead) return handleSaveLead(editLead, fields as Record<string, string | undefined>); }}
       />
 
       {/* Slice 4.9 — bulk delete confirmation */}

@@ -50,8 +50,11 @@ function BulkActionsBar({ count, onClear, actions = [] }) {
               key={i}
               onClick={a.onClick}
               className={cx(
-                'text-sm px-3 py-1.5 rounded-full hover:bg-white/10 inline-flex items-center gap-1.5',
-                a.danger && 'text-red-300'
+                'text-sm px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 transition-colors',
+                a.highlight
+                  ? 'bg-primary text-ink hover:bg-primary-hover font-semibold'
+                  : 'hover:bg-white/10',
+                a.danger && !a.highlight && 'text-red-300'
               )}
             >
               {a.icon}{a.label}

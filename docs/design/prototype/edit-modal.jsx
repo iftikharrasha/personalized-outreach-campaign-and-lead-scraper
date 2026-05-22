@@ -142,7 +142,7 @@ function EditCampaignModal({ open, campaign, onClose, onSave, onArchive }) {
         <div className="rounded-[14px] bg-canvas-soft dark:bg-d-canvas-soft p-3 flex items-start gap-3">
           <div className="mt-0.5 text-mute"><IconSearch size={16} /></div>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-mute font-semibold">Google Maps query</div>
+            <div className="text-[11px] uppercase tracking-wide text-mute font-semibold">{(SOURCES[campaign.source] || SOURCES.gmaps).queryLabel}</div>
             <div className="text-[14px] font-medium text-ink dark:text-d-ink mt-0.5 truncate">
               {derivedKeyword() || <span className="text-mute italic">Fill in the fields above…</span>}
             </div>

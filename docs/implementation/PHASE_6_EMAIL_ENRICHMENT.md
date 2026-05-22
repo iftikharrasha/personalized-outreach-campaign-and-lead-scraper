@@ -4,8 +4,8 @@
 > websites with native HTTP fetch + regex. An optional, on-demand enrichment
 > layer that runs through the existing worker — never during initial scraping.
 
-**Status:** NOT STARTED
-**Last Updated:** –
+**Status:** COMPLETED — all slices 6.1–6.8 done; 114 tests passing
+**Last Updated:** 2026-05-22
 
 **Prerequisites:** [Phase 5](./PHASE_5_QA_AND_HARDENING.md) completed.
 
@@ -15,14 +15,14 @@
 
 | # | Slice | Status |
 |---|---|---|
-| 6.1 | `EnrichmentRun` model + migration | NOT STARTED |
-| 6.2 | Email extraction core (`extract-email.ts`) — ranked strategy + denylist | NOT STARTED |
-| 6.3 | Enrichment engine (`enrich.ts`) — URL discovery, fetch, concurrency | NOT STARTED |
-| 6.4 | Worker integration — claim + process enrichment jobs | NOT STARTED |
-| 6.5 | API routes — queue, status, cancel | NOT STARTED |
-| 6.6 | Single enrichment UI — "Find Email" button in the Email modal | NOT STARTED |
-| 6.7 | Bulk enrichment UI — "Find Email" in the bulk-actions pill + banner | NOT STARTED |
-| 6.8 | Tests — extraction, engine, worker flow, cancellation | NOT STARTED |
+| 6.1 | `EnrichmentRun` model + migration | COMPLETED |
+| 6.2 | Email extraction core (`extract-email.ts`) — ranked strategy + denylist | COMPLETED |
+| 6.3 | Enrichment engine (`enrich.ts`) — URL discovery, fetch, concurrency | COMPLETED |
+| 6.4 | Worker integration — claim + process enrichment jobs | COMPLETED |
+| 6.5 | API routes — queue, status, cancel | COMPLETED |
+| 6.6 | Single enrichment UI — "Find Email" button in the Email modal | COMPLETED |
+| 6.7 | Bulk enrichment UI — "Find Email" in the bulk-actions pill + banner | COMPLETED |
+| 6.8 | Tests — extraction, engine, worker flow, cancellation | COMPLETED |
 
 ---
 
@@ -340,19 +340,64 @@ are rare for local businesses.
 
 ### Step 3 — Apply the denylist
 
-Drop any candidate that:
+Two layers, checked in order:
 
-- Ends in an image/asset extension — `.png .jpg .jpeg .svg .gif .webp`
-  (catches `sprite@2x.png`).
-- Uses a known placeholder domain — `example.com`, `domain.com`, `email.com`,
-  `yourdomain.com`, `sentry.io`, `wixpress.com`, `test.com`.
-- Contains an asset token such as `@2x` / `@3x`.
+**Hard deny — exact domain match**
+`example.com` · `domain.com` · `email.com` · `yourdomain.com` · `test.com` ·
+`sentry.io` · `mailchimp.com` · `sendgrid.net` · `amazonaws.com` ·
+`googletagmanager.com` · `google.com` · `facebook.com` · `schema.org`
 
-### Step 4 — Prefer the lead's own domain
+**Hard deny — suffix match (blocks all subdomains too)**
+`wixpress.com` (catches `sentry.wixpress.com`, `sentry-next.wixpress.com`, …) ·
+`squarespace.com` · `shopify.com` · `myshopify.com` · `weebly.com` ·
+`godaddy.com` · `zendesk.com` · `intercom.io` · `hubspot.com` ·
+`klaviyo.com` · `mailgun.org` · `sparkpostmail.com`
 
-If multiple candidates survive, an address on the lead's own domain
-(`info@joespizza.com` for `joespizza.com`) beats a stray third-party address
-(`someone@gmail.com`) found elsewhere on the page.
+**Also drop** any address ending in an image/asset extension
+(`.png .jpg .svg .gif .webp .ico .woff .ttf .eot`) or containing `@2x` / `@3x`.
+
+### Step 4 — Select the best surviving candidate
+
+After the denylist, candidates are ranked through **four tiers**, stopping at
+the first tier that produces a result:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    EMAIL SELECTION PRIORITY ORDER                       │
+├──────┬──────────────────────────────────┬──────────────────────────────┤
+│ Tier │ Condition                        │ Example                      │
+├──────┼──────────────────────────────────┼──────────────────────────────┤
+│  1   │ Same domain as lead's website    │ info@joespizza.com           │
+│      │ (own-domain address)             │ contact@vitosnytrattoria.com │
+├──────┼──────────────────────────────────┼──────────────────────────────┤
+│  2   │ Non-free-mail, third-party       │ info@partneragency.com       │
+│      │ business domain                  │ (rare — found on the page)   │
+├──────┼──────────────────────────────────┼──────────────────────────────┤
+│  3   │ Free-mail — ranked by local-part │ see sub-scores below ↓       │
+│      │ (Gmail / Yahoo / Outlook / …)    │                              │
+├──────┼──────────────────────────────────┼──────────────────────────────┤
+│  —   │ No candidates survived           │ → null (lead stays blank)    │
+└──────┴──────────────────────────────────┴──────────────────────────────┘
+
+  Tier 3 — free-mail sub-scores (lower = better, first place wins)
+  ┌─────────┬────────────────────────────────────────┬──────────────────────────────────────┐
+  │ Score 0 │ Generic business handle                │ info@   contact@   hello@            │
+  │         │ (business operating on free mail)      │ bookings@  reservations@  office@    │
+  │         │                                        │ mail@  admin@  reception@  general@  │
+  ├─────────┼────────────────────────────────────────┼──────────────────────────────────────┤
+  │ Score 1 │ Owner / decision-maker signal          │ owner@   manager@   director@        │
+  │         │ (high-value outreach target)           │ gm@  ceo@  president@  sales@        │
+  ├─────────┼────────────────────────────────────────┼──────────────────────────────────────┤
+  │ Score 2 │ Name-shaped local-part                 │ jane.smith@   carlos@                │
+  │         │ (letters only, optional dot/hyphen)    │ eric.rynne@   frankleamy@            │
+  ├─────────┼────────────────────────────────────────┼──────────────────────────────────────┤
+  │ Score 3 │ Everything else                        │ x4j2k9@   frank1972leamy@            │
+  │         │ (random strings, numbers, etc.)        │ 8eb368c6@                            │
+  └─────────┴────────────────────────────────────────┴──────────────────────────────────────┘
+
+  When no lead domain is known, Tier 1 & 2 are skipped and Tier 3 runs directly.
+  Free-mail is never hard-denied — a sole trader may genuinely use Gmail.
+```
 
 ### Step 5 — Normalize
 
@@ -715,7 +760,7 @@ enough to eyeball whether the feature lands in the target band.
 
 ### Slice 6.1 — `EnrichmentRun` model + migration
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `EnrichmentRunStatus` enum + `EnrichmentRun` model added to `prisma/schema.prisma`; `enrichmentRuns` relation added to `Campaign`; migration `add-enrichment-runs` applied.
 
 - Add `EnrichmentRunStatus` enum and `EnrichmentRun` model to
   `prisma/schema.prisma` (§11), including the `leadIds String[]` worklist
@@ -728,7 +773,7 @@ enough to eyeball whether the feature lands in the target band.
 
 ### Slice 6.2 — Email extraction core
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `apps/scraper/src/extract-email.ts`; `extractEmail(html, leadDomain)` implements entity-decode → mailto: first → body regex fallback → denylist → same-domain preference → normalize.
 
 `apps/scraper/src/extract-email.ts` — pure, no I/O.
 
@@ -744,7 +789,7 @@ entity-encoded `@`.
 
 ### Slice 6.3 — Enrichment engine
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `apps/scraper/src/enrich.ts`; `enrichLead(domain)` resolves base URL, fetches homepage, follows up to 3 real contact links (falls back to guessed paths), stops at first email. `enrichLeads(leads, onProgress, isCancelled)` runs batches of 5 with conditional 0.5 s delay for >50 leads. `writeLeadEmail` writes found email to DB immediately.
 
 `apps/scraper/src/enrich.ts`.
 
@@ -761,7 +806,7 @@ engine-level test with a mocked `fetch`.
 
 ### Slice 6.4 — Worker integration
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `reapOrphanRuns` extended to cover `enrichment_runs`; `claimNextJob` rewritten to claim oldest PENDING job from either table (releases the newer one if both ready); `processEnrichmentJob` implements full lifecycle (RUNNING → per-lead counters → COMPLETED/CANCELLED/FAILED); `runWorkerLoop` dispatches to the right processor by job type.
 
 - Extend the claim step to claim either job type and dispatch (§13).
 - `processEnrichmentJob` — lifecycle, batching, per-batch cancellation check,
@@ -775,7 +820,7 @@ mocked `fetch`, assert counters and `COMPLETED`.
 
 ### Slice 6.5 — API routes
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `POST /api/enrich`, `GET /api/enrich/[runId]`, `POST /api/enrich/[runId]/cancel` implemented; shape mirrors scrape endpoints.
 
 - `POST /api/enrich`, `GET /api/enrich/[runId]`,
   `POST /api/enrich/[runId]/cancel` (§12).
@@ -787,7 +832,7 @@ poll, cancel.
 
 ### Slice 6.6 — Single enrichment UI
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — `EmailModal` updated with auto-find panel (gmaps-only, no existing email) and Re-find link (has existing email); `EnrichmentBanner` + `SearchingPill` components added; enrichment state machine wired into campaign detail page (polling, flash-on-found, completion/cancel toasts); "Find Email" added to bulk-actions pill.
 
 - Add a **Find Email** button to the existing Email modal (§14).
 - On click: queue a 1-lead run, close the modal, show the "Email searching…"
@@ -799,7 +844,7 @@ poll, cancel.
 
 ### Slice 6.7 — Bulk enrichment UI
 
-**Status:** NOT STARTED
+**Status:** COMPLETED — delivered as part of Slice 6.6. `handleFindEmails(leadIds[])` is one shared path; "Find Email" button in the bulk-actions pill calls it with all selected IDs. Same banner, same Stop button, same live table polling.
 
 - Add a **Find Email** action to the floating bulk-actions pill (§15).
 - Reuse the active-run banner + Stop-button timer; show live counters; table

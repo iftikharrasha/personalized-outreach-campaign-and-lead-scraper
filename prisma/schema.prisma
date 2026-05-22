@@ -34,6 +34,14 @@ enum ScrapeRunStatus {
   CANCELLED
 }
 
+enum EnrichmentRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 // ───────── Models ─────────
 
 model Campaign {
@@ -51,8 +59,9 @@ model Campaign {
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
-  leads      Lead[]
-  scrapeRuns ScrapeRun[]
+  leads          Lead[]
+  scrapeRuns     ScrapeRun[]
+  enrichmentRuns EnrichmentRun[]
 
   @@map("campaigns")
 }
@@ -110,6 +119,30 @@ model ScrapeRun {
   @@index([campaignId])
   @@index([status])
   @@map("scrape_runs")
+}
+
+model EnrichmentRun {
+  id             String              @id @default(uuid()) @db.Uuid
+  campaignId     String              @map("campaign_id") @db.Uuid
+  status         EnrichmentRunStatus @default(PENDING)
+  // Worklist — lead IDs this run must process (filtered at queue time to those without emails).
+  leadIds        String[]            @map("lead_ids")
+  totalLeads     Int                 @map("total_leads")
+  processedCount Int                 @default(0) @map("processed_count")
+  foundCount     Int                 @default(0) @map("found_count")
+  failedCount    Int                 @default(0) @map("failed_count")
+  skippedCount   Int                 @default(0) @map("skipped_count")
+  startedAt      DateTime?           @map("started_at")
+  finishedAt     DateTime?           @map("finished_at")
+  durationSec    Int?                @map("duration_sec")
+  errorMessage   String?             @map("error_message")
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([status])
+  @@map("enrichment_runs")
 }
 
 model LeadHistory {

@@ -1,6 +1,19 @@
 // ───────── Campaign Detail Page ─────────
+// Source-aware: the leads table renders different columns + a different
+// <LeadRow*> component depending on campaign.source.
+//   gmaps    → business name | phone | email | website | notes | added | status
+//   yelp     → business name | phone | rating | price | neighborhood | notes | status
+//   linkedin → person name | title | company | location | connection | notes | status
+//
+// Stat cards, scraping banner, run history card, bulk actions stay identical
+// across sources — that's the spine of the design.
 
-function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit, scraping, onStopScraping, scrapingFound, onLeadStatusChange, onLeadNotesChange, onLeadEmailChange, onExport }) {
+function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit, scraping, onStopScraping, scrapingFound, onLeadStatusChange, onLeadNotesChange, onLeadEmailChange, onExport, enrichRun, enrichElapsedMs, enrichJustFound, onFindEmails, onStopEnrich }) {
+  const src = SOURCES[campaign.source] || SOURCES.gmaps;
+  const isYelp     = campaign.source === 'yelp';
+  const isLinkedIn = campaign.source === 'linkedin';
+  const entity = src.leadEntity;
+  const entityCap = entity.charAt(0).toUpperCase() + entity.slice(1);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -15,7 +28,10 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
   const filtered = useMemo(() => {
     return leads.filter((l) => {
       const matchStatus = statusFilter === 'ALL' || l.status === statusFilter;
-      const matchSearch = !search || (l.name + l.phone + l.website + (l.email || '') + l.notes).toLowerCase().includes(search.toLowerCase());
+      const searchable = (l.name || '') + (l.phone || '') + (l.website || '') + (l.email || '') + (l.notes || '') +
+        (l.role || '') + (l.company || '') + (l.location || '') + (l.headline || '') +
+        (l.neighborhood || '') + (l.primaryCategory || '');
+      const matchSearch = !search || searchable.toLowerCase().includes(search.toLowerCase());
       return matchStatus && matchSearch;
     });
   }, [leads, statusFilter, search]);
@@ -58,7 +74,7 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
         onClick={onBack}
         className="inline-flex items-center gap-1.5 text-[13px] text-mute hover:text-ink dark:hover:text-d-ink mb-5 transition-colors">
         
-        <IconChevronLeft size={14} /> All campaigns
+        <IconChevronLeft size={14} /> All {src.label} campaigns
       </button>
 
       {/* Header */}
@@ -77,7 +93,22 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
           </div>
           <div className="text-[15px] text-body dark:text-d-body mt-1">"{campaign.keyword}"</div>
           <div className="text-[12px] text-mute mt-1.5 flex items-center gap-1.5">
-            <IconMapPin size={11} /> USA <span className="text-line dark:text-d-line">›</span> {campaign.state} <span className="text-line dark:text-d-line">›</span> {campaign.city || 'Entire State'}
+            {isLinkedIn ? (
+              <>
+                <IconBriefcase size={11} />
+                {campaign.industry || 'Any industry'} <span className="text-line dark:text-d-line">›</span> {campaign.city}
+                {campaign.seniority && campaign.seniority !== 'Any seniority' && (
+                  <>
+                    <span className="text-line dark:text-d-line">›</span>
+                    {campaign.seniority}
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <IconMapPin size={11} /> USA <span className="text-line dark:text-d-line">›</span> {campaign.state} <span className="text-line dark:text-d-line">›</span> {campaign.city || 'Entire State'}
+              </>
+            )}
           </div>
         </div>
 
@@ -104,6 +135,18 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
         </div>
       </div>
 
+      {/* Email enrichment banner — appears whenever an EnrichmentRun is
+          active for this campaign. Sits above the scraping banner because
+          both can theoretically coexist (different worker job types). */}
+      {enrichRun && campaign.source === 'gmaps' && (
+        <EnrichmentBanner
+          run={enrichRun}
+          elapsedMs={enrichElapsedMs}
+          onStop={onStopEnrich}
+          currentLeadName={enrichRun.currentLeadId ? (leads.find((l) => l.id === enrichRun.currentLeadId)?.name) : ''}
+        />
+      )}
+
       {/* Scraping banner */}
       {scraping &&
       <div className="mt-6 rounded-card bg-[#fff7d6] dark:bg-[#3a3206] border border-[#ffd11a]/40 px-5 py-4 flex items-center gap-4 anim-fadein" style={{ borderRadius: "10px" }}>
@@ -112,9 +155,9 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="text-[15px] font-semibold text-ink dark:text-d-ink">Scraping in progress…</div>
+              <div className="text-[15px] font-semibold text-ink dark:text-d-ink">Scraping {src.label} in progress…</div>
               <span className="text-[13px] text-body dark:text-d-body">
-                <span className="font-semibold text-ink dark:text-d-ink tabular-nums">{scrapingFound}</span> leads found · ~3s polling
+                <span className="font-semibold text-ink dark:text-d-ink tabular-nums">{scrapingFound}</span> {entity} found · ~3s polling
               </span>
             </div>
             <div className="mt-2 relative h-1 rounded-full bg-[#ffd11a]/20 overflow-hidden">
@@ -126,21 +169,21 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
 
       {/* Stat cards */}
       <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total leads" value={stats.total} icon={<IconUser size={18} />} />
+        <StatCard label={`Total ${entity}`} value={stats.total} icon={isLinkedIn ? <IconUser size={18} /> : <IconUser size={18} />} />
         <StatCard label="New" value={stats.new} sub={stats.new > 0 ? `${Math.round(stats.new / Math.max(1, stats.total) * 100)}% of total` : '—'} icon={<IconSparkles size={18} />} />
-        <StatCard label="Contacted" value={stats.contacted} icon={<IconPhone size={18} />} />
+        <StatCard label={isLinkedIn ? 'Reached out' : 'Contacted'} value={stats.contacted} icon={isLinkedIn ? <IconNetwork size={18} /> : <IconPhone size={18} />} />
         <StatCard label="Conversion" value={`${stats.conversion}%`} sub="replied + closed / total" icon={<IconCheckCircle size={18} />} />
       </div>
 
       {/* Toolbar */}
       <div className="mt-8 flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-[20px] font-semibold text-ink dark:text-d-ink">Leads</h2>
+          <h2 className="text-[20px] font-semibold text-ink dark:text-d-ink">{entityCap}</h2>
           <p className="text-[12px] text-mute mt-0.5">{filtered.length} of {leads.length} shown</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Input
-            placeholder="Search by name, phone, notes…"
+            placeholder={isLinkedIn ? 'Search by name, title, company…' : 'Search by name, phone, notes…'}
             value={search} onChange={(e) => setSearch(e.target.value)}
             leftIcon={<IconSearch size={16} />}
             className="w-[280px]" />
@@ -165,28 +208,62 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
                     onChange={togglePage} />
                   
                 </th>
-                <th className="py-3 px-3">Business</th>
-                <th className="py-3 px-3">Phone</th>
-                <th className="py-3 px-3">Email</th>
-                <th className="py-3 px-3">Website</th>
-                <th className="py-3 px-3">Notes</th>
-                <th className="py-3 px-3">Added</th>
-                <th className="py-3 px-3 pr-5 text-right">Status</th>
+                {isLinkedIn ? (
+                  <>
+                    <th className="py-3 px-3">Person</th>
+                    <th className="py-3 px-3">Role @ Company</th>
+                    <th className="py-3 px-3">Location</th>
+                    <th className="py-3 px-3">Connection</th>
+                    <th className="py-3 px-3">Notes</th>
+                    <th className="py-3 px-3">Added</th>
+                    <th className="py-3 px-3 pr-5 text-right">Status</th>
+                  </>
+                ) : isYelp ? (
+                  <>
+                    <th className="py-3 px-3">Business</th>
+                    <th className="py-3 px-3">Phone</th>
+                    <th className="py-3 px-3">Rating</th>
+                    <th className="py-3 px-3">Price</th>
+                    <th className="py-3 px-3">Neighborhood</th>
+                    <th className="py-3 px-3">Notes</th>
+                    <th className="py-3 px-3">Added</th>
+                    <th className="py-3 px-3 pr-5 text-right">Status</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="py-3 px-3">Business</th>
+                    <th className="py-3 px-3">Phone</th>
+                    <th className="py-3 px-3">Email</th>
+                    <th className="py-3 px-3">Website</th>
+                    <th className="py-3 px-3">Notes</th>
+                    <th className="py-3 px-3">Added</th>
+                    <th className="py-3 px-3 pr-5 text-right">Status</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((l) =>
-              <LeadRow
-                key={l.id} lead={l}
-                selected={selected.has(l.id)}
-                onToggle={(on) => toggleOne(l.id, on)}
-                onStatusChange={(s) => onLeadStatusChange(l.id, s)}
-                onEditNotes={() => setEditingNotes(l)}
-                onEditEmail={() => setEditingEmail(l)} />
-
-              )}
+              {pageRows.map((l) => {
+                const common = {
+                  key: l.id, lead: l,
+                  selected: selected.has(l.id),
+                  onToggle: (on) => toggleOne(l.id, on),
+                  onStatusChange: (s) => onLeadStatusChange(l.id, s),
+                  onEditNotes: () => setEditingNotes(l),
+                };
+                if (isLinkedIn) return <LeadRowLinkedIn {...common} />;
+                if (isYelp)     return <LeadRowYelp {...common} />;
+                return (
+                  <LeadRow
+                    {...common}
+                    onEditEmail={() => setEditingEmail(l)}
+                    searching={enrichRun?.currentLeadId === l.id}
+                    justFound={enrichJustFound?.has(l.id)}
+                  />
+                );
+              })}
               {pageRows.length === 0 &&
-              <tr><td colSpan={8} className="py-16 text-center text-mute text-sm">No leads match your filters.</td></tr>
+              <tr><td colSpan={isLinkedIn ? 8 : isYelp ? 9 : 8} className="py-16 text-center text-mute text-sm">No {entity} match your filters.</td></tr>
               }
             </tbody>
           </table>
@@ -229,11 +306,24 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
         
       </div>
 
-      {/* Bulk action bar — extracted to <BulkActionsBar /> */}
+      {/* Bulk action bar — extracted to <BulkActionsBar />.
+          Find Email is gmaps-only — yelp/linkedin rows don't render an
+          email column in this prototype, so the action would have no visible
+          effect there. */}
       <BulkActionsBar
         count={selected.size}
         onClear={clearSelection}
         actions={[
+        ...(campaign.source === 'gmaps' ? [{
+          type: 'button',
+          label: 'Find email',
+          icon: <IconMail size={14} />,
+          highlight: true,
+          onClick: () => {
+            onFindEmails?.(Array.from(selected));
+            clearSelection();
+          }
+        }, { type: 'divider' }] : []),
         {
           type: 'menu',
           label: 'Set status',
@@ -276,7 +366,9 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
       <EmailModal
         lead={editingEmail}
         onClose={() => setEditingEmail(null)}
-        onSave={(email) => {onLeadEmailChange?.(editingEmail.id, email);setEditingEmail(null);}} />
+        onSave={(email) => {onLeadEmailChange?.(editingEmail.id, email);setEditingEmail(null);}}
+        onFindEmail={() => { onFindEmails?.([editingEmail.id]); setEditingEmail(null); }}
+        canEnrich={campaign.source === 'gmaps'} />
       }
     </div>);
 
@@ -284,7 +376,249 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
 
 Object.assign(window, { CampaignDetailPage });
 
-function LeadRow({ lead, selected, onToggle, onStatusChange, onEditNotes, onEditEmail }) {
+// ── Reusable status-dropdown cell ──
+// Renders <Badge> + chevron; clicking opens a portaled dropdown with the
+// status options. Extracted so all three LeadRow* variants share identical
+// behaviour without duplicating the portal + outside-click logic.
+function StatusCell({ status, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState(null);
+  const triggerRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (triggerRef.current && triggerRef.current.contains(e.target)) return;
+      if (dropdownRef.current && dropdownRef.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (r) setCoords({ top: r.bottom + 6, left: r.left });
+    };
+    measure();
+    const onScroll = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', measure);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', measure);
+    };
+  }, [open]);
+
+  const meta = STATUS_OPTIONS.find((s) => s.value === status) || STATUS_OPTIONS[0];
+
+  return (
+    <>
+      <button ref={triggerRef} onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1">
+        <Badge tone={meta.tone}>{meta.label}</Badge>
+        <IconChevronDown size={12} className={cx('text-mute transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && coords && ReactDOM.createPortal(
+        <div
+          ref={dropdownRef}
+          style={{ position: 'fixed', top: coords.top, left: coords.left, zIndex: 100 }}
+          className="bg-canvas dark:bg-d-canvas border border-line dark:border-d-line rounded-[14px] p-1.5 min-w-[170px] anim-fadein shadow-[0_18px_40px_-16px_rgba(0,0,0,0.25)]">
+          {STATUS_OPTIONS.map((s) => (
+            <button
+              key={s.value}
+              onClick={() => { onChange(s.value); setOpen(false); }}
+              className={cx(
+                'w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-sm rounded-[10px] hover:bg-canvas-soft dark:hover:bg-d-canvas-soft',
+                s.value === status && 'bg-canvas-soft dark:bg-d-canvas-soft'
+              )}>
+              <Badge tone={s.tone}>{s.label}</Badge>
+              {s.value === status && <IconCheck size={14} className="text-positive" />}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+// ── Star rating cell (Yelp) ──
+// Shows 5 stars filled to the lead's rating; numeric rating + review count
+// trail on the right. Half-star approximated via opacity for simplicity —
+// half-stars are very nice-to-have, not core to the design vocabulary.
+function YelpRating({ rating, reviews }) {
+  const full = Math.floor(rating);
+  const has  = rating - full >= 0.25 && rating - full < 0.75;
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex items-center">
+        {[0, 1, 2, 3, 4].map((i) => {
+          const filled = i < full;
+          const half   = i === full && has;
+          return (
+            <IconStar
+              key={i} size={14}
+              className={cx(
+                filled ? 'text-[#d32323]' : half ? 'text-[#d32323]/60' : 'text-line dark:text-d-line',
+              )}
+              fill={filled || half ? 'currentColor' : 'none'}
+              strokeWidth={filled || half ? 0 : 2}
+            />
+          );
+        })}
+      </div>
+      <span className="text-[12px] tabular-nums text-body dark:text-d-body font-medium">{rating.toFixed(1)}</span>
+      <span className="text-[11px] text-mute tabular-nums">({reviews})</span>
+    </div>
+  );
+}
+
+// ── Yelp lead row ──
+function LeadRowYelp({ lead, selected, onToggle, onStatusChange, onEditNotes }) {
+  return (
+    <tr className={cx(
+      'group border-t border-line/60 dark:border-d-line/60 text-[14px]',
+      'hover:bg-canvas-soft/60 dark:hover:bg-d-canvas-soft/60 transition-colors',
+      selected && 'bg-primary-pale/40 dark:bg-primary/10'
+    )}>
+      <td className="py-3.5 pl-5 pr-3"><Checkbox checked={selected} onChange={onToggle} /></td>
+
+      <td className="py-3.5 px-3">
+        <div className="flex items-center gap-2">
+          <div className="font-semibold text-ink dark:text-d-ink truncate max-w-[200px]">{lead.name}</div>
+          {lead.claimed && (
+            <span title="Claimed on Yelp" className="text-positive shrink-0"><IconCheckCircle size={13} /></span>
+          )}
+        </div>
+        <div className="text-[12px] text-mute mt-0.5 truncate max-w-[220px]">{lead.primaryCategory}</div>
+      </td>
+
+      <td className="py-3.5 px-3">
+        {lead.phone ? (
+          <a href={`tel:${lead.phone}`} className="text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink tabular-nums inline-flex items-center gap-1.5">
+            <IconPhone size={12} className="text-mute" />{lead.phone}
+          </a>
+        ) : <span className="text-mute">—</span>}
+      </td>
+
+      <td className="py-3.5 px-3"><YelpRating rating={lead.rating} reviews={lead.reviews} /></td>
+
+      <td className="py-3.5 px-3">
+        <span className="inline-flex items-center text-[13px] font-semibold text-positive tabular-nums">{lead.price}</span>
+        <span className="text-[13px] text-line dark:text-d-line tabular-nums">{'$$$$'.slice(lead.price.length)}</span>
+      </td>
+
+      <td className="py-3.5 px-3 max-w-[180px]">
+        <span className="inline-flex items-center gap-1 text-[12px] font-medium text-body dark:text-d-body bg-canvas-soft dark:bg-d-canvas-soft rounded-full px-2.5 py-1 truncate max-w-[170px]">
+          <IconMapPin size={10} />{lead.neighborhood}
+        </span>
+      </td>
+
+      <td className="py-3.5 px-3 max-w-[260px]">
+        {lead.notes ?
+          <button onClick={onEditNotes} className="text-left text-[13px] text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink line-clamp-1 max-w-[240px]">
+            {lead.notes}
+          </button> :
+          <button onClick={onEditNotes} className="text-mute hover:text-ink dark:hover:text-d-ink text-[13px] inline-flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
+            <IconNote size={12} /> Add note
+          </button>
+        }
+      </td>
+
+      <td className="py-3.5 px-3 text-[12px] text-mute">{lead.addedAt}</td>
+
+      <td className="py-3.5 px-3 pr-5 text-right">
+        <StatusCell status={lead.status} onChange={onStatusChange} />
+      </td>
+    </tr>
+  );
+}
+
+// ── LinkedIn lead row ──
+// No phone, no website. Profile URL is the canonical handle. Connection
+// degree gets its own pill with brand-neutral color (we don't ape LinkedIn's
+// exact UI here).
+function LeadRowLinkedIn({ lead, selected, onToggle, onStatusChange, onEditNotes }) {
+  const degreeTone = lead.degree === '2nd' ? 'positive' : lead.degree === '3rd' ? 'warning' : 'mute';
+  return (
+    <tr className={cx(
+      'group border-t border-line/60 dark:border-d-line/60 text-[14px]',
+      'hover:bg-canvas-soft/60 dark:hover:bg-d-canvas-soft/60 transition-colors',
+      selected && 'bg-primary-pale/40 dark:bg-primary/10'
+    )}>
+      <td className="py-3.5 pl-5 pr-3"><Checkbox checked={selected} onChange={onToggle} /></td>
+
+      <td className="py-3.5 px-3">
+        <div className="flex items-center gap-2.5">
+          {/* Avatar fallback — initials */}
+          <div className="w-9 h-9 rounded-full bg-canvas-soft dark:bg-d-canvas-soft text-ink dark:text-d-ink flex items-center justify-center text-[12px] font-semibold shrink-0">
+            {lead.name.split(' ').map(p => p[0]).slice(0, 2).join('')}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <div className="font-semibold text-ink dark:text-d-ink truncate max-w-[180px]">{lead.name}</div>
+              {lead.premium && (
+                <span title="LinkedIn Premium" className="text-[#b88300] dark:text-[#ffd11a] text-[10px] font-bold border border-current rounded-[3px] px-1 leading-tight">in</span>
+              )}
+            </div>
+            <a href={`https://www.linkedin.com/in/${lead.profileSlug}`} target="_blank" rel="noreferrer"
+              className="text-[11px] text-mute hover:text-ink dark:hover:text-d-ink inline-flex items-center gap-1 mt-0.5">
+              /in/{lead.profileSlug} <IconExternal size={10} />
+            </a>
+          </div>
+        </div>
+      </td>
+
+      <td className="py-3.5 px-3 max-w-[260px]">
+        <div className="font-medium text-ink dark:text-d-ink truncate max-w-[240px]">{lead.role}</div>
+        <div className="text-[12px] text-mute mt-0.5 truncate max-w-[240px] inline-flex items-center gap-1">
+          <IconBuilding size={10} />{lead.company}
+        </div>
+      </td>
+
+      <td className="py-3.5 px-3">
+        <span className="inline-flex items-center gap-1 text-[12px] font-medium text-body dark:text-d-body bg-canvas-soft dark:bg-d-canvas-soft rounded-full px-2.5 py-1">
+          <IconMapPin size={10} />{lead.location}
+        </span>
+      </td>
+
+      <td className="py-3.5 px-3">
+        <div className="flex items-center gap-2">
+          <Badge tone={degreeTone} size="sm">{lead.degree}</Badge>
+          {lead.mutuals > 0 && (
+            <span className="text-[11px] text-mute tabular-nums inline-flex items-center gap-1">
+              <IconNetwork size={11} />{lead.mutuals} mutual{lead.mutuals === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
+      </td>
+
+      <td className="py-3.5 px-3 max-w-[260px]">
+        {lead.notes ?
+          <button onClick={onEditNotes} className="text-left text-[13px] text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink line-clamp-1 max-w-[240px]">
+            {lead.notes}
+          </button> :
+          <button onClick={onEditNotes} className="text-mute hover:text-ink dark:hover:text-d-ink text-[13px] inline-flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
+            <IconNote size={12} /> Add note
+          </button>
+        }
+      </td>
+
+      <td className="py-3.5 px-3 text-[12px] text-mute">{lead.addedAt}</td>
+
+      <td className="py-3.5 px-3 pr-5 text-right">
+        <StatusCell status={lead.status} onChange={onStatusChange} />
+      </td>
+    </tr>
+  );
+}
+
+Object.assign(window, { StatusCell, YelpRating, LeadRowYelp, LeadRowLinkedIn });
+
+function LeadRow({ lead, selected, onToggle, onStatusChange, onEditNotes, onEditEmail, searching, justFound }) {
   const [statusOpen, setStatusOpen] = useState(false);
   const [coords, setCoords] = useState(null);
   const triggerRef = useRef(null);
@@ -326,7 +660,8 @@ function LeadRow({ lead, selected, onToggle, onStatusChange, onEditNotes, onEdit
     <tr className={cx(
       'group border-t border-line/60 dark:border-d-line/60 text-[14px]',
       'hover:bg-canvas-soft/60 dark:hover:bg-d-canvas-soft/60 transition-colors',
-      selected && 'bg-primary-pale/40 dark:bg-primary/10'
+      selected && 'bg-primary-pale/40 dark:bg-primary/10',
+      justFound && 'flash-found'
     )}>
       <td className="py-3.5 pl-5 pr-3">
         <Checkbox checked={selected} onChange={onToggle} />
@@ -342,11 +677,16 @@ function LeadRow({ lead, selected, onToggle, onStatusChange, onEditNotes, onEdit
       </td>
       <td className="py-3.5 px-3 max-w-[200px]">
         {lead.email ?
-        <button onClick={onEditEmail} className="inline-flex items-center gap-1.5 text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink truncate max-w-[180px]" title={lead.email}>
-            <IconMail size={12} className="text-mute shrink-0" />
+        <button onClick={onEditEmail} className={cx(
+          'inline-flex items-center gap-1.5 text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink truncate max-w-[180px]',
+          justFound && 'pop-email text-ink dark:text-d-ink font-medium'
+        )} title={lead.email}>
+            <IconMail size={12} className={cx('shrink-0', justFound ? 'text-primary' : 'text-mute')} />
             <span className="truncate">{lead.email}</span>
+            {justFound && <IconSparkles size={11} className="text-positive shrink-0" />}
           </button> :
-
+        searching ?
+        <SearchingPill /> :
         <button onClick={onEditEmail} className="text-mute hover:text-ink dark:hover:text-d-ink text-[13px] inline-flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
             <IconMail size={12} /> Add email
           </button>
@@ -409,9 +749,10 @@ function LeadRow({ lead, selected, onToggle, onStatusChange, onEditNotes, onEdit
 
 }
 
-function EmailModal({ lead, onClose, onSave }) {
+function EmailModal({ lead, onClose, onSave, onFindEmail, canEnrich }) {
   const [text, setText] = useState(lead.email || '');
   const [error, setError] = useState('');
+  const hasExisting = !!lead.email;
   const submit = () => {
     const v = text.trim();
     if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
@@ -420,23 +761,62 @@ function EmailModal({ lead, onClose, onSave }) {
     }
     onSave(v);
   };
+  const cleanDomain = (lead.website || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
   return (
-    <Modal open={true} onClose={onClose} width={480}>
+    <Modal open={true} onClose={onClose} width={520}>
       <div className="flex items-start justify-between mb-4">
         <div>
           <h2 className="text-[18px] font-semibold text-ink dark:text-d-ink">Email for {lead.name}</h2>
-          <p className="text-[12px] text-mute mt-0.5">Manually entered — emails aren't scraped from Google Maps.</p>
+          <p className="text-[12px] text-mute mt-0.5">
+            {canEnrich
+              ? <>Auto-find crawls the lead’s website (homepage → contact pages) and stops at the first verified address. Or type one in manually.</>
+              : <>Manually entered — emails aren’t scraped from this source.</>}
+          </p>
         </div>
         <button onClick={onClose} className="text-mute hover:text-ink dark:hover:text-d-ink p-1"><IconX size={18} /></button>
       </div>
+
+      {/* Auto-find panel — gmaps leads w/ no existing email. Primary action. */}
+      {canEnrich && !hasExisting && (
+        <div className="mb-5 border border-primary/40 bg-primary-pale/50 dark:bg-primary/10 p-4" style={{ borderRadius: '14px' }}>
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-full bg-primary text-ink flex items-center justify-center shrink-0">
+              <IconSparkles size={16} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[14px] font-semibold text-ink dark:text-d-ink">Find it automatically</div>
+              <div className="text-[12.5px] text-body dark:text-d-body mt-0.5">
+                We’ll crawl <span className="font-medium text-ink dark:text-d-ink">{cleanDomain || 'the website'}</span> and pull a real contact email. Usually 1–2 seconds.
+              </div>
+            </div>
+            <Button variant="primary" size="md" onClick={onFindEmail} leftIcon={<IconMail size={14} />}>
+              Find email
+            </Button>
+          </div>
+          <div className="mt-3 pl-12 text-[11.5px] text-mute leading-relaxed">
+            Skips placeholder addresses and image filenames · prefers <span className="font-medium text-body dark:text-d-body">@{cleanDomain || 'domain.com'}</span> over third-party addresses
+          </div>
+        </div>
+      )}
+
+      {/* Manual entry */}
+      <div className="flex items-center justify-between mb-2">
+        <label className="text-[11px] uppercase tracking-wider font-semibold text-mute">
+          {canEnrich && !hasExisting ? 'Or enter manually' : 'Email address'}
+        </label>
+        {hasExisting && canEnrich && (
+          <button onClick={onFindEmail} className="text-[12px] text-mute hover:text-ink dark:hover:text-d-ink inline-flex items-center gap-1">
+            <IconRotate size={11} /> Re-find
+          </button>
+        )}
+      </div>
       <Input
-        autoFocus
+        autoFocus={hasExisting}
         type="email"
         value={text}
         onChange={(e) => {setText(e.target.value);setError('');}}
         placeholder="client@example.com"
         leftIcon={<IconMail size={16} />} />
-      
       {error && <div className="text-[12px] text-negative mt-2">{error}</div>}
       <div className="mt-5 flex items-center justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>

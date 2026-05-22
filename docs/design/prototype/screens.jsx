@@ -3,14 +3,16 @@
 // ── Sidebar (inverted palette) ──
 function Sidebar({ collapsed, onToggle, active = 'home', onNavigate }) {
   const items = [
-  { id: 'home', icon: <IconLayout size={20} />, label: 'Outrich Manager' },
-  { id: 'gmaps', icon: <IconMapPin size={20} />, label: 'Google Maps Scraper' }];
+    { id: 'home',     icon: <IconLayout    size={20} />, label: 'Outrich Manager' },
+    { id: 'gmaps',    icon: <IconMapPin    size={20} />, label: 'Google Maps' },
+    { id: 'yelp',     icon: <IconStar      size={20} />, label: 'Yelp' },
+    { id: 'linkedin', icon: <IconBriefcase size={20} />, label: 'LinkedIn' },
+  ];
 
   const futureItems = [
-  { id: 'yelp', icon: <IconGlobe size={20} />, label: 'Yelp', soon: true },
-  { id: 'linkedin', icon: <IconUser size={20} />, label: 'LinkedIn', soon: true }];
-
-
+    { id: 'instagram',  icon: <IconGlobe size={20} />, label: 'Instagram',  soon: true },
+    { id: 'ypages',     icon: <IconNetwork size={20} />, label: 'YellowPages', soon: true },
+  ];
   // Sidebar is inverted vs main content:
   //   light theme  → ink (near-black) sidebar with light text
   //   dark theme   → canvas (off-white) sidebar with ink text
@@ -176,6 +178,25 @@ function Header({ onMenuClick, breadcrumb, dark, onToggleDark }) {
 function CampaignCard({ c, onOpen, onRun, onPause, onRestore, onArchive }) {
   const isArchived = c.status === 'ARCHIVED';
   const isPaused = c.status === 'PAUSED';
+  const isLinkedIn = c.source === 'linkedin';
+  const isYelp     = c.source === 'yelp';
+  const leadNoun   = isLinkedIn ? 'People' : 'Leads';
+
+  // Location chip differs per source:
+  //   gmaps / yelp  → "USA · CA · San Diego"
+  //   linkedin      → "Software · SF Bay Area"  (industry + metro)
+  const locationChip = isLinkedIn ? (
+    <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-body dark:text-d-body bg-canvas-soft dark:bg-d-canvas-soft rounded-full px-2.5 py-1">
+      <IconBriefcase size={11} />
+      {c.industry || 'Any industry'} · {c.city}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-body dark:text-d-body bg-canvas-soft dark:bg-d-canvas-soft rounded-full px-2.5 py-1">
+      <IconMapPin size={11} />
+      USA · {abbrevState(c.state)} · {c.city}
+    </span>
+  );
+
   return (
     <Card className="p-6 group hover:translate-y-[-2px] transition-transform duration-200 cursor-default flex flex-col gap-4">
       {/* Top: name + menu */}
@@ -201,10 +222,7 @@ function CampaignCard({ c, onOpen, onRun, onPause, onRestore, onArchive }) {
 
       {/* Location pill + status */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-body dark:text-d-body bg-canvas-soft dark:bg-d-canvas-soft rounded-full px-2.5 py-1">
-          <IconMapPin size={11} />
-          USA · {abbrevState(c.state)} · {c.city}
-        </span>
+        {locationChip}
         <StatusDot status={c.status} />
       </div>
 
@@ -212,11 +230,11 @@ function CampaignCard({ c, onOpen, onRun, onPause, onRestore, onArchive }) {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <div className="text-[26px] font-bold leading-none text-ink dark:text-d-ink tabular-nums">{c.totalLeads}</div>
-          <div className="text-[11px] text-mute mt-1 uppercase tracking-wide">Leads</div>
+          <div className="text-[11px] text-mute mt-1 uppercase tracking-wide">{leadNoun}</div>
         </div>
         <div>
           <div className="text-[26px] font-bold leading-none text-ink dark:text-d-ink tabular-nums">{c.contacted}</div>
-          <div className="text-[11px] text-mute mt-1 uppercase tracking-wide">Contacted</div>
+          <div className="text-[11px] text-mute mt-1 uppercase tracking-wide">{isLinkedIn ? 'Reached out' : 'Contacted'}</div>
         </div>
       </div>
 
@@ -270,9 +288,10 @@ function abbrevState(name) {
 }
 
 // ── Campaign list page ──
-function CampaignListPage({ campaigns, onOpen, onRun, onCreate, onPause, onRestore, onArchive, emptyState }) {
+function CampaignListPage({ campaigns, onOpen, onRun, onCreate, onPause, onRestore, onArchive, emptyState, source = 'gmaps' }) {
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState('all');
+  const src = SOURCES[source] || SOURCES.gmaps;
 
   const filtered = useMemo(() => {
     return campaigns.filter((c) => {
@@ -292,17 +311,20 @@ function CampaignListPage({ campaigns, onOpen, onRun, onCreate, onPause, onResto
   if (emptyState) {
     return (
       <div className="px-8 py-10">
-        <PageHeader title="Campaigns" actions={<Button variant="primary" size="lg" leftIcon={<IconPlus size={16} />} onClick={onCreate}>New Campaign</Button>} />
-        <EmptyState onCreate={onCreate} />
+        <PageHeader title={`${src.label} campaigns`} actions={<Button variant="primary" size="lg" leftIcon={<IconPlus size={16} />} onClick={onCreate}>New Campaign</Button>} />
+        <EmptyState onCreate={onCreate} source={source} />
       </div>);
 
   }
 
+  const totalLeads = campaigns.reduce((s, c) => s + c.totalLeads, 0);
+  const noun = src.leadEntity;
+
   return (
     <div className="px-8 py-10 max-w-[1480px] mx-auto">
       <PageHeader
-        title="Campaigns"
-        subtitle={`${counts.active} active · ${campaigns.reduce((s, c) => s + c.totalLeads, 0)} leads scraped`}
+        title={`${src.label} campaigns`}
+        subtitle={`${counts.active} active · ${totalLeads.toLocaleString()} ${noun} scraped`}
         actions={
         <Button variant="primary" size="lg" leftIcon={<IconPlus size={16} />} onClick={onCreate}>
             New Campaign
@@ -367,15 +389,19 @@ function PageHeader({ title, subtitle, actions, breadcrumb }) {
 }
 
 // ── Empty state ──
-function EmptyState({ onCreate }) {
+function EmptyState({ onCreate, source = 'gmaps' }) {
+  const src = SOURCES[source] || SOURCES.gmaps;
+  const icon = source === 'yelp' ? <IconStar size={36} /> :
+               source === 'linkedin' ? <IconBriefcase size={36} /> :
+               <IconMapPin size={36} />;
   return (
     <div className="mt-24 flex flex-col items-center text-center max-w-[440px] mx-auto">
       <div className="w-20 h-20 rounded-full bg-canvas dark:bg-d-canvas flex items-center justify-center text-mute mb-6">
-        <IconMapPin size={36} />
+        {icon}
       </div>
-      <h2 className="text-[24px] font-semibold text-ink dark:text-d-ink">No campaigns yet</h2>
+      <h2 className="text-[24px] font-semibold text-ink dark:text-d-ink">{src.emptyTitle}</h2>
       <p className="text-[14px] text-mute mt-2 leading-relaxed">
-        Create your first campaign to start scraping leads from Google Maps. Each campaign is a single keyword tied to a location.
+        {src.emptyBody}
       </p>
       <Button variant="primary" size="lg" leftIcon={<IconPlus size={16} />} onClick={onCreate} className="mt-7">
         Create your first campaign
@@ -385,27 +411,49 @@ function EmptyState({ onCreate }) {
 }
 
 // ── Create Campaign modal ──
-function CreateCampaignModal({ open, onClose, onCreate }) {
+function CreateCampaignModal({ open, onClose, onCreate, source = 'gmaps' }) {
+  const src = SOURCES[source] || SOURCES.gmaps;
+  const cats = CATEGORIES_BY_SOURCE[source] || CATEGORIES_BY_SOURCE.gmaps;
+  const isLinkedIn = source === 'linkedin';
+
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('restaurants');
+  const [category, setCategory] = useState(cats[0].value);
   const [customKeyword, setCustomKeyword] = useState('');
+  // gmaps / yelp use country + state + city
   const [country, setCountry] = useState('US');
   const [state, setState] = useState('California');
   const [city, setCity] = useState('');
   const [entireState, setEntireState] = useState(false);
+  // linkedin uses metro + industry + seniority instead
+  const [metro, setMetro]         = useState(LINKEDIN_METROS[0]);
+  const [industry, setIndustry]   = useState(LINKEDIN_INDUSTRIES[0]);
+  const [seniority, setSeniority] = useState(LINKEDIN_SENIORITY[0]);
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
     if (open) {
-      setName('');setCategory('restaurants');setCustomKeyword('');
-      setCountry('US');setState('California');setCity('');setEntireState(false);setErrors({});
+      setName('');
+      setCategory(cats[0].value);
+      setCustomKeyword('');
+      setCountry('US'); setState('California'); setCity(''); setEntireState(false);
+      setMetro(LINKEDIN_METROS[0]); setIndustry(LINKEDIN_INDUSTRIES[0]); setSeniority(LINKEDIN_SENIORITY[0]);
+      setErrors({});
     }
-  }, [open]);
+  }, [open, source]);
+
+  const baseLabel = () => {
+    if (category === 'custom') return customKeyword.trim();
+    return cats.find((c) => c.value === category)?.label.toLowerCase() || '';
+  };
 
   const derivedKeyword = () => {
-    const base = category === 'custom' ?
-    customKeyword.trim() :
-    CATEGORIES.find((c) => c.value === category)?.label.toLowerCase() || '';
+    const base = baseLabel();
+    if (isLinkedIn) {
+      const parts = [base];
+      if (industry && industry !== 'Any industry') parts.push(industry);
+      parts.push(metro);
+      return base ? parts.filter(Boolean).join(' · ') : '';
+    }
     const loc = entireState ? state : city ? city : state;
     return base && loc ? `${base} in ${loc}` : base;
   };
@@ -413,71 +461,115 @@ function CreateCampaignModal({ open, onClose, onCreate }) {
   const submit = () => {
     const errs = {};
     if (!name.trim()) errs.name = 'Campaign name is required';
-    if (category === 'custom' && !customKeyword.trim()) errs.keyword = 'Enter a custom keyword';
-    if (!entireState && !city.trim()) errs.city = 'City is required (or pick Entire State)';
+    if (category === 'custom' && !customKeyword.trim()) errs.keyword = isLinkedIn ? 'Enter a custom title' : 'Enter a custom keyword';
+    if (!isLinkedIn && !entireState && !city.trim()) errs.city = 'City is required (or pick Entire State)';
     setErrors(errs);
     if (Object.keys(errs).length) return;
-    onCreate({
+
+    const payload = isLinkedIn ? {
+      source,
+      name: name.trim(),
+      keyword: derivedKeyword(),
+      category,
+      country, state: '', city: metro,
+      industry, seniority,
+    } : {
+      source,
       name: name.trim(),
       keyword: derivedKeyword(),
       category,
       country, state,
-      city: entireState ? '' : city.trim()
-    });
+      city: entireState ? '' : city.trim(),
+    };
+    onCreate(payload);
   };
 
   return (
     <Modal open={open} onClose={onClose} width={560}>
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h2 className="text-[22px] font-semibold text-ink dark:text-d-ink">New Campaign</h2>
-          <p className="text-[13px] text-mute mt-1">One campaign = one search keyword + one location.</p>
+          <h2 className="text-[22px] font-semibold text-ink dark:text-d-ink">New {src.label} campaign</h2>
+          <p className="text-[13px] text-mute mt-1">
+            {isLinkedIn
+              ? 'One campaign = one job title + one metro. Industry narrows the result set further.'
+              : 'One campaign = one search keyword + one location.'}
+          </p>
         </div>
         <button onClick={onClose} className="text-mute hover:text-ink dark:hover:text-d-ink p-1"><IconX size={18} /></button>
       </div>
 
       <div className="space-y-4">
-        <Field label="Campaign name" hint='e.g. "San Diego Restaurants"' error={errors.name}>
+        <Field label="Campaign name" hint={isLinkedIn ? 'e.g. "SF Bay Area Founders"' : 'e.g. "San Diego Restaurants"'} error={errors.name}>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Give it a memorable name" />
         </Field>
 
-        <Field label="What to scrape">
+        <Field label={isLinkedIn ? 'Target role' : 'What to scrape'}>
           <Select value={category} onChange={(e) => setCategory(e.target.value)}>
-            {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            {cats.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </Select>
         </Field>
 
         {category === 'custom' &&
-        <Field label="Custom keyword" hint="The exact query that will be searched on Google Maps" error={errors.keyword}>
-            <Input value={customKeyword} onChange={(e) => setCustomKeyword(e.target.value)} placeholder="vegan bakeries" />
+          <Field label={isLinkedIn ? 'Custom title' : 'Custom keyword'} hint={isLinkedIn ? 'e.g. "Head of Growth"' : 'The exact query that will be searched'} error={errors.keyword}>
+            <Input value={customKeyword} onChange={(e) => setCustomKeyword(e.target.value)} placeholder={isLinkedIn ? 'Head of Growth' : 'vegan bakeries'} />
           </Field>
         }
 
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Country">
-            <Select value={country} onChange={(e) => {setCountry(e.target.value);setState(STATES_BY_COUNTRY[e.target.value][0]);}}>
-              {COUNTRIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </Select>
-          </Field>
-          <Field label="State / Region">
-            <Select value={state} onChange={(e) => setState(e.target.value)}>
-              {STATES_BY_COUNTRY[country].map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
-          </Field>
-        </div>
+        {isLinkedIn ? (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Metro area">
+                <Select value={metro} onChange={(e) => setMetro(e.target.value)}>
+                  {LINKEDIN_METROS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </Select>
+              </Field>
+              <Field label="Seniority filter">
+                <Select value={seniority} onChange={(e) => setSeniority(e.target.value)}>
+                  {LINKEDIN_SENIORITY.map((s) => <option key={s} value={s}>{s}</option>)}
+                </Select>
+              </Field>
+            </div>
+            <Field label="Industry">
+              <Select value={industry} onChange={(e) => setIndustry(e.target.value)}>
+                {LINKEDIN_INDUSTRIES.map((i) => <option key={i} value={i}>{i}</option>)}
+              </Select>
+            </Field>
+            <div className="rounded-[14px] bg-[#fff7d6]/60 dark:bg-[#3a3206]/40 border border-[#ffd11a]/30 p-3 flex items-start gap-2.5">
+              <span className="text-[#7a4500] dark:text-[#ffd11a] mt-0.5"><IconAlert size={14} /></span>
+              <div className="text-[12px] text-body dark:text-d-body leading-relaxed">
+                LinkedIn caps People-search at <span className="font-semibold">~1,000 profiles</span> per query and ~80 commercial profile-views per week on a free account. The scraper paginates respectfully and stops at the limit.
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Country">
+                <Select value={country} onChange={(e) => {setCountry(e.target.value);setState(STATES_BY_COUNTRY[e.target.value][0]);}}>
+                  {COUNTRIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </Select>
+              </Field>
+              <Field label="State / Region">
+                <Select value={state} onChange={(e) => setState(e.target.value)}>
+                  {STATES_BY_COUNTRY[country].map((s) => <option key={s} value={s}>{s}</option>)}
+                </Select>
+              </Field>
+            </div>
 
-        {!entireState &&
-        <Field label="City" error={errors.city}>
-            <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="San Diego" />
-          </Field>
-        }
-        <Checkbox checked={entireState} onChange={setEntireState} label={`Scrape entire ${state}`} />
+            {!entireState &&
+              <Field label={source === 'yelp' ? 'City or neighborhood' : 'City'} error={errors.city}>
+                <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder={src.statePlaceholder} />
+              </Field>
+            }
+            <Checkbox checked={entireState} onChange={setEntireState} label={`Scrape entire ${state}`} />
+          </>
+        )}
 
         {/* Preview chip */}
         <div className="rounded-[14px] bg-canvas-soft dark:bg-d-canvas-soft p-3 flex items-start gap-3 mt-2">
           <div className="mt-0.5 text-mute"><IconSearch size={16} /></div>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-mute font-semibold">Google Maps query</div>
+            <div className="text-[11px] uppercase tracking-wide text-mute font-semibold">{src.queryLabel}</div>
             <div className="text-[14px] font-medium text-ink dark:text-d-ink mt-0.5 truncate">
               {derivedKeyword() || <span className="text-mute italic">Fill in the fields above…</span>}
             </div>
@@ -511,18 +603,21 @@ function RunCampaignModal({ open, onClose, campaign, onStart }) {
   const [mode, setMode] = useState('append');
   useEffect(() => {if (open) setMode('append');}, [open]);
   if (!campaign) return null;
+  const src = SOURCES[campaign.source] || SOURCES.gmaps;
+  const isLinkedIn = campaign.source === 'linkedin';
+  const entity = src.leadEntity;
   return (
     <Modal open={open} onClose={onClose} width={520}>
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h2 className="text-[20px] font-semibold text-ink dark:text-d-ink">Run campaign</h2>
+          <h2 className="text-[20px] font-semibold text-ink dark:text-d-ink">Run {src.label} campaign</h2>
           <p className="text-[13px] text-mute mt-1">{campaign.name}</p>
         </div>
         <button onClick={onClose} className="text-mute hover:text-ink dark:hover:text-d-ink p-1"><IconX size={18} /></button>
       </div>
 
       <div className="rounded-[14px] bg-canvas-soft dark:bg-d-canvas-soft px-4 py-3 mb-5">
-        <div className="text-[11px] uppercase tracking-wide text-mute font-semibold">Keyword</div>
+        <div className="text-[11px] uppercase tracking-wide text-mute font-semibold">{src.queryLabel}</div>
         <div className="text-[15px] font-medium text-ink dark:text-d-ink mt-0.5 truncate">"{campaign.keyword}"</div>
       </div>
 
@@ -530,14 +625,16 @@ function RunCampaignModal({ open, onClose, campaign, onStart }) {
         <RadioCard
           checked={mode === 'append'}
           onChange={() => setMode('append')}
-          title="Add new leads only"
-          desc="Existing leads stay. Duplicates (by website or phone) are skipped automatically." />
+          title={`Add new ${entity} only`}
+          desc={isLinkedIn
+            ? 'Existing profiles stay. Duplicates (same profile URL) are skipped automatically.'
+            : 'Existing leads stay. Duplicates (by website or phone) are skipped automatically.'} />
         
         <RadioCard
           checked={mode === 'replace'}
           onChange={() => setMode('replace')}
-          title="Replace all leads"
-          desc={`Deletes all ${campaign.totalLeads} existing leads before scraping. Use only if the data is stale.`}
+          title={`Replace all ${entity}`}
+          desc={`Deletes all ${campaign.totalLeads} existing ${entity} before scraping. Use only if the data is stale.`}
           danger />
         
       </div>
@@ -546,10 +643,19 @@ function RunCampaignModal({ open, onClose, campaign, onStart }) {
       <div className="mt-4 rounded-[14px] bg-red-50 dark:bg-red-900/20 border border-red-200/60 dark:border-red-800/60 p-3.5 flex items-start gap-2.5">
           <span className="text-negative mt-0.5"><IconAlert size={16} /></span>
           <div className="text-[13px] text-[#a7000d] dark:text-red-300 leading-relaxed">
-            <strong className="font-semibold">This is destructive.</strong> All {campaign.totalLeads} existing leads — including their statuses, notes, and history — will be permanently deleted before scraping starts.
+            <strong className="font-semibold">This is destructive.</strong> All {campaign.totalLeads} existing {entity} — including their statuses, notes, and history — will be permanently deleted before scraping starts.
           </div>
         </div>
       }
+
+      {isLinkedIn && (
+        <div className="mt-4 rounded-[14px] bg-canvas-soft/70 dark:bg-d-canvas-soft/70 border border-line dark:border-d-line p-3.5 flex items-start gap-2.5">
+          <span className="text-mute mt-0.5"><IconBriefcase size={14} /></span>
+          <div className="text-[12px] text-body dark:text-d-body leading-relaxed">
+            The scraper signs in with your saved cookies and respects LinkedIn's view limits — it stops automatically when the weekly cap is reached.
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 -mx-6 px-6 pt-5 border-t border-line dark:border-d-line flex items-center justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
