@@ -1,33 +1,79 @@
 "use client";
+import { NotesModal } from "@/components/leads/notes-modal";
 import { BulkActionsBar } from "@/components/ui/bulk-actions-bar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { RunHistoryCard } from "@/components/ui/run-history-card";
+import { Modal } from "@/components/ui/modal";
+import { RunHistoryCard, type RunEntry } from "@/components/ui/run-history-card";
 import { Select } from "@/components/ui/select";
 import { StatCard } from "@/components/ui/stat-card";
 import type { Campaign, Lead } from "@prisma/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Check,
   CheckCircle,
+  ChevronLeft,
+  ChevronRight,
+  DollarSign,
   Download,
   ExternalLink,
   Filter,
   History,
+  Mail,
   MapPin,
   Phone,
   RotateCcw,
+  StickyNote,
   Sparkles,
   Trash2,
   TrendingUp,
   User,
+  X,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import * as React from "react";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+interface DashboardStats {
+  funnel: {
+    totalLeads:    number;
+    contacted:     number;
+    replied:       number;
+    closed:        number;
+    campaignCount: number;
+  };
+  earnings: {
+    totalEarned:  number;
+    avgDeal:      number;
+    thisMonthEarned: number;
+    monthlyTrend: { month: string; earned: number }[];
+  };
+  health: {
+    totalRunCount: number;
+    avgDurationSec: number | null;
+    avgDupes:       number | null;
+    hasBlock:       boolean;
+  };
+}
+
+type ClosedLead = Lead & { campaignName?: string };
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function formatMoney(n: number) {
   return "$" + (n || 0).toLocaleString("en-US");
+}
+
+function fmtDuration(sec: number | null): string {
+  if (sec == null) return "—";
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
 function TrendBars({ data }: { data: { month: string; earned: number }[] }) {
@@ -62,57 +108,169 @@ function SectionLabel({ title, hint, className = "" }: { title: string; hint?: s
   );
 }
 
-type ClosedLead = Lead & { campaignName?: string };
+// ── Add Earning Modal ─────────────────────────────────────────────────────────
+
+function AddEarningModal({ open, lead, onClose, onSave }: {
+  open: boolean;
+  lead: ClosedLead | null;
+  onClose: () => void;
+  onSave: (amount: number) => Promise<void>;
+}) {
+  const [value, setValue] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) { setValue(""); setSaving(false); }
+  }, [open]);
+
+  if (!lead) return null;
+
+  const parsed  = parseInt(value.replace(/[^0-9]/g, ""), 10);
+  const isValid = !isNaN(parsed) && parsed > 0;
+  const newTotal = (lead.raised ?? 0) + (isValid ? parsed : 0);
+
+  const handleSave = async () => {
+    if (!isValid) return;
+    setSaving(true);
+    try { await onSave(parsed); } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} width={460} labelledBy="earning-modal-title">
+      <div className="flex items-start justify-between mb-4">
+        <div className="min-w-0 pr-3">
+          <h2 id="earning-modal-title" className="text-[18px] font-semibold text-ink dark:text-d-ink">
+            Add Earning
+          </h2>
+          <p className="text-[14px] font-medium text-body dark:text-d-body mt-0.5 truncate">{lead.businessName}</p>
+          <p className="text-[12px] text-mute mt-1">
+            Current total: <span className="font-semibold text-positive">{formatMoney(lead.raised ?? 0)}</span>
+            {isValid && (
+              <> · After: <span className="font-semibold text-positive">{formatMoney(newTotal)}</span></>
+            )}
+          </p>
+        </div>
+        <button onClick={onClose} className="text-mute hover:text-ink dark:hover:text-d-ink p-1 shrink-0">
+          <X size={18} />
+        </button>
+      </div>
+
+      <div className="relative">
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-mute text-[15px] font-medium select-none">$</span>
+        <input
+          autoFocus
+          type="text"
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ""))}
+          onKeyDown={(e) => e.key === "Enter" && handleSave()}
+          placeholder="0"
+          className="w-full bg-canvas dark:bg-d-canvas text-ink dark:text-d-ink border border-line dark:border-d-line rounded-[14px] pl-8 pr-4 py-3 text-[16px] font-semibold placeholder:text-mute focus:outline-none focus:ring-2 focus:ring-primary"
+        />
+      </div>
+
+      <div className="mt-5 flex items-center justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave} loading={saving} disabled={!isValid} leftIcon={<Check size={14} />}>
+          Add earning
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const qc     = useQueryClient();
+
+  // Dashboard aggregate stats
+  const { data: stats } = useQuery<DashboardStats>({
+    queryKey:      ["dashboard-stats"],
+    queryFn:       () => fetch("/api/dashboard").then((r) => r.json()),
+    refetchInterval: 30_000,
+  });
+
+  // All campaigns (for the Winning Leads filter dropdown)
   const { data: campaigns = [] } = useQuery<Campaign[]>({
     queryKey: ["campaigns"],
-    queryFn: () => fetch("/api/campaigns").then((r) => r.json()),
-  });
-  const { data: allLeads = [] } = useQuery<Lead[]>({
-    queryKey: ["all-leads"],
-    queryFn: () => fetch("/api/leads").then((r) => r.json()),
+    queryFn:  () => fetch("/api/campaigns").then((r) => r.json()),
   });
 
-  const [search, setSearch] = React.useState("");
-  const [campaignFilter, setCampaignFilter] = React.useState("ALL");
-  const [selected, setSelected] = React.useState(new Set<string>());
-
-  const totalLeads = allLeads.length;
-  const contacted = allLeads.filter((l) => ["CONTACTED", "REPLIED", "CLOSED"].includes(l.status ?? "")).length;
-  const replied = allLeads.filter((l) => l.status === "REPLIED" || l.status === "CLOSED").length;
-  const closed = allLeads.filter((l) => l.status === "CLOSED").length;
-  const conversion = totalLeads ? Math.round((replied + closed) / totalLeads * 100) : 0;
-
-  const closedLeads: ClosedLead[] = React.useMemo(() =>
-    allLeads
-      .filter((l) => l.status === "CLOSED")
-      .map((l) => ({
+  // Closed leads only — for the Winning Leads table
+  const { data: closedLeads = [] } = useQuery<ClosedLead[]>({
+    queryKey: ["closed-leads"],
+    queryFn:  async () => {
+      const leads = await fetch("/api/leads?status=CLOSED").then((r) => r.json()) as Lead[];
+      return leads.map((l) => ({
         ...l,
         campaignName: campaigns.find((c) => c.id === l.campaignId)?.name,
-      })),
-    [allLeads, campaigns]
-  );
+      }));
+    },
+    enabled: campaigns.length > 0,
+  });
 
-  const totalEarned = closedLeads.reduce((s, l) => s + (l.raised ?? 0), 0);
-  const avgDeal = closed ? Math.round(totalEarned / closed) : 0;
+  // Global run history
+  const { data: allRuns = [] } = useQuery<RunEntry[]>({
+    queryKey:        ["all-runs"],
+    queryFn:         () => fetch("/api/scrape/runs").then((r) => r.json()),
+    refetchInterval: 15_000,
+  });
 
-  const filtered = React.useMemo(() =>
+  // ── Derived values ─────────────────────────────────────────────────────────
+
+  const f = stats?.funnel;
+  const e = stats?.earnings;
+  const h = stats?.health;
+
+  const totalLeads    = f?.totalLeads    ?? 0;
+  const contacted     = f?.contacted     ?? 0;
+  const replied       = f?.replied       ?? 0;
+  const closed        = f?.closed        ?? 0;
+  const campaignCount = f?.campaignCount ?? campaigns.length;
+
+  const totalEarned      = e?.totalEarned      ?? 0;
+  const avgDeal          = e?.avgDeal          ?? 0;
+  const thisMonthEarned  = e?.thisMonthEarned  ?? 0;
+  const monthlyTrend     = e?.monthlyTrend     ?? [];
+
+  const conversion = totalLeads > 0 ? Math.round((replied / totalLeads) * 100) : 0;
+
+  // ── Winning leads filter state ─────────────────────────────────────────────
+
+  const [search, setCampaignSearch] = React.useState("");
+  const [campaignFilter, setCampaignFilter] = React.useState("ALL");
+  const [selected, setSelected] = React.useState(new Set<string>());
+  const [leadsPage, setLeadsPage] = React.useState(1);
+  const [notesLead, setNotesLead] = React.useState<ClosedLead | null>(null);
+  const [earningLead, setEarningLead] = React.useState<ClosedLead | null>(null);
+
+  const filteredLeads = React.useMemo(() =>
     closedLeads.filter((l) => {
       const matchCampaign = campaignFilter === "ALL" || l.campaignId === campaignFilter;
-      const matchSearch = !search || (l.businessName + (l.phone ?? "") + (l.websiteUrl ?? "") + (l.notes ?? "") + (l.campaignName ?? "")).toLowerCase().includes(search.toLowerCase());
+      const matchSearch   = !search || (
+        (l.businessName ?? "") + (l.phone ?? "") + (l.websiteUrl ?? "") + (l.notes ?? "") + (l.campaignName ?? "")
+      ).toLowerCase().includes(search.toLowerCase());
       return matchCampaign && matchSearch;
     }),
     [closedLeads, campaignFilter, search]
   );
 
-  const filteredEarnings = filtered.reduce((s, l) => s + (l.raised ?? 0), 0);
-  const allSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
-  const someSelected = filtered.some((r) => selected.has(r.id)) && !allSelected;
+  React.useEffect(() => { setLeadsPage(1); }, [campaignFilter, search]);
+
+  const LEADS_PAGE_SIZE  = 10;
+  const leadsTotalPages  = Math.max(1, Math.ceil(filteredLeads.length / LEADS_PAGE_SIZE));
+  const leadsSafePage    = Math.min(leadsPage, leadsTotalPages);
+  const leadsPageRows    = filteredLeads.slice((leadsSafePage - 1) * LEADS_PAGE_SIZE, leadsSafePage * LEADS_PAGE_SIZE);
+
+  const filteredEarnings = filteredLeads.reduce((s, l) => s + (l.raised ?? 0), 0);
+  const allSelected      = filteredLeads.length > 0 && filteredLeads.every((r) => selected.has(r.id));
+  const someSelected     = filteredLeads.some((r) => selected.has(r.id)) && !allSelected;
 
   const toggleAll = (on: boolean) => {
     const next = new Set(selected);
-    filtered.forEach((r) => on ? next.add(r.id) : next.delete(r.id));
+    filteredLeads.forEach((r) => on ? next.add(r.id) : next.delete(r.id));
     setSelected(next);
   };
   const toggleOne = (id: string, on: boolean) => {
@@ -121,6 +279,8 @@ export default function DashboardPage() {
     setSelected(next);
   };
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="px-8 py-10 max-w-[1480px] mx-auto pb-32">
       {/* Header */}
@@ -128,7 +288,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-[32px] sm:text-[36px] font-bold text-ink dark:text-d-ink leading-tight tracking-tight">Outrich Manager</h1>
           <p className="text-[14px] text-mute mt-1.5">
-            {campaigns.length} campaigns · {closed} closed deals · {formatMoney(totalEarned)} earned to date
+            {campaignCount} campaign{campaignCount !== 1 ? "s" : ""} · {closed} closed deal{closed !== 1 ? "s" : ""} · {formatMoney(totalEarned)} earned to date
           </p>
         </div>
         <Link href="/googlemaps">
@@ -136,57 +296,112 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* Row 1 — Outreach funnel */}
+      {/* ── Outreach funnel ── */}
       <SectionLabel className="mt-10" title="Outreach funnel" hint="Across all campaigns" />
       <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total leads" value={totalLeads.toLocaleString()} icon={<User size={18} />} sub={`Across ${campaigns.length} campaigns`} />
-        <StatCard label="Contacted" value={contacted.toLocaleString()} icon={<Phone size={18} />} sub={totalLeads ? `${Math.round(contacted / totalLeads * 100)}% of total` : "—"} />
-        <StatCard label="Replied" value={replied.toLocaleString()} icon={<History size={18} />} sub={totalLeads ? `${Math.round(replied / totalLeads * 100)}% of total` : "—"} />
-        <StatCard label="Closed" value={closed.toLocaleString()} icon={<CheckCircle size={18} />} sub={totalLeads ? `${Math.round(closed / totalLeads * 100)}% of total` : "—"} tone="ink" />
-      </div>
-
-      {/* Row 2 — Earnings */}
-      <SectionLabel className="mt-10" title="Earnings" hint="From closed leads" />
-      <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Conversion" value={`${conversion}%`} icon={<Sparkles size={18} />} sub="replied + closed / total" />
-        <StatCard label="Total earned" value={formatMoney(totalEarned)} icon={<CheckCircle size={18} />} sub={`Avg deal ${formatMoney(avgDeal)}`} />
-        <StatCard label="This month" value="—" icon={<TrendingUp size={18} />} sub="No data yet" />
-        <StatCard label="Monthly avg." value="—" accent={<TrendBars data={[]} />} />
-      </div>
-
-      {/* Row 3 — Scraper health */}
-      <SectionLabel className="mt-10" title="Campaign health" hint="Performance of the scraper itself" />
-      <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total run time" value="—" icon={<History size={18} />} sub="No runs yet" />
-        <StatCard label="Avg. completion" value="—" icon={<RotateCcw size={18} />} sub="per campaign run" />
-        <StatCard label="Avg. dupes" value="—" icon={<Filter size={18} />} sub="per single run" />
-        <StatCard label="No active block" value="Clear to run" valueClassName="text-[28px] !font-bold text-positive" icon={<CheckCircle size={16} className="text-positive" />} sub="No active rate limit." />
-      </div>
-
-      {/* Global Run History */}
-      <SectionLabel className="mt-12" title="Run history" hint="Every scrape run, across every campaign" />
-      <div className="mt-3">
-        <RunHistoryCard
-          title="All runs"
-          subtitle="No runs yet — runs appear after Phase 2"
-          runs={[]}
-          showCampaign
+        <StatCard
+          label="Total leads"
+          value={totalLeads.toLocaleString()}
+          icon={<User size={18} />}
+          sub={`Across ${campaignCount} campaign${campaignCount !== 1 ? "s" : ""}`}
+        />
+        <StatCard
+          label="Contacted"
+          value={contacted.toLocaleString()}
+          icon={<Phone size={18} />}
+          sub={totalLeads ? `${Math.round((contacted / totalLeads) * 100)}% of total` : "No leads yet"}
+        />
+        <StatCard
+          label="Replied"
+          value={replied.toLocaleString()}
+          icon={<History size={18} />}
+          sub={totalLeads ? `${Math.round((replied / totalLeads) * 100)}% of total` : "No leads yet"}
+        />
+        <StatCard
+          label="Closed"
+          value={closed.toLocaleString()}
+          icon={<CheckCircle size={18} />}
+          sub={totalLeads ? `${Math.round((closed / totalLeads) * 100)}% of total` : "No leads yet"}
+          tone="ink"
         />
       </div>
 
-      {/* Winning Leads */}
+      {/* ── Earnings ── */}
+      <SectionLabel className="mt-10" title="Earnings" hint="From closed leads" />
+      <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Conversion"
+          value={`${conversion}%`}
+          icon={<Sparkles size={18} />}
+          sub="replied + closed / total"
+        />
+        <StatCard
+          label="Total earned"
+          value={formatMoney(totalEarned)}
+          icon={<CheckCircle size={18} />}
+          sub={closed > 0 ? `Avg deal ${formatMoney(avgDeal)}` : "No closed deals yet"}
+        />
+        <StatCard
+          label="This month"
+          value={thisMonthEarned > 0 ? formatMoney(thisMonthEarned) : "—"}
+          icon={<TrendingUp size={18} />}
+          sub={thisMonthEarned > 0 ? "from closed deals" : "No closed deals this month"}
+        />
+        <StatCard
+          label="Monthly trend"
+          value=""
+          accent={
+            monthlyTrend.some((m) => m.earned > 0)
+              ? <TrendBars data={monthlyTrend} />
+              : <div className="mt-4 text-[12px] text-mute">No earnings data yet</div>
+          }
+        />
+      </div>
+
+      {/* ── Campaign health ── */}
+      <SectionLabel className="mt-10" title="Campaign health" hint="Performance across all scraper runs" />
+      <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Total runs"
+          value={h?.totalRunCount != null ? h.totalRunCount.toLocaleString() : "—"}
+          icon={<History size={18} />}
+          sub={h?.totalRunCount ? `${h.totalRunCount} run${h.totalRunCount !== 1 ? "s" : ""} recorded` : "No runs yet"}
+        />
+        <StatCard
+          label="Avg. run time"
+          value={h?.avgDurationSec != null ? fmtDuration(h.avgDurationSec) : "—"}
+          icon={<RotateCcw size={18} />}
+          sub="per completed run"
+        />
+        <StatCard
+          label="Avg. dupes"
+          value={h?.avgDupes != null ? h.avgDupes.toLocaleString() : "—"}
+          icon={<Filter size={18} />}
+          sub="per run (deduped)"
+        />
+        <StatCard
+          label={h?.hasBlock ? "Block detected" : "No active block"}
+          value={h?.hasBlock ? "Check runs" : "Clear to run"}
+          valueClassName={`text-[22px] !font-bold ${h?.hasBlock ? "text-negative" : "text-positive"}`}
+          icon={<CheckCircle size={16} className={h?.hasBlock ? "text-negative" : "text-positive"} />}
+          sub={h?.hasBlock ? "A recent run was blocked" : "No active rate limit"}
+        />
+      </div>
+
+      {/* ── Winning Leads ── */}
       <div className="mt-12 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-[20px] font-semibold text-ink dark:text-d-ink">Winning Leads</h2>
           <p className="text-[12px] text-mute mt-0.5">
-            {filtered.length} of {closedLeads.length} shown ·{" "}
+            {filteredLeads.length} of {closedLeads.length} shown ·{" "}
             <span className="text-positive font-semibold">{formatMoney(filteredEarnings)}</span> raised
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Input
             placeholder="Search by name, phone, notes…"
-            value={search} onChange={(e) => setSearch(e.target.value)}
+            value={search}
+            onChange={(e) => setCampaignSearch(e.target.value)}
             className="w-[280px]"
           />
           <Select value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)} className="w-[200px]">
@@ -206,6 +421,7 @@ export default function DashboardPage() {
                 </th>
                 <th className="py-3 px-3">Business</th>
                 <th className="py-3 px-3">Phone</th>
+                <th className="py-3 px-3">Email</th>
                 <th className="py-3 px-3">Website</th>
                 <th className="py-3 px-3">Notes</th>
                 <th className="py-3 px-3 text-right">Raised</th>
@@ -213,52 +429,83 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((l) => (
-                <tr key={l.id} className={`group border-t border-line/60 dark:border-d-line/60 text-[14px] hover:bg-canvas-soft/60 dark:hover:bg-d-canvas-soft/60 transition-colors${selected.has(l.id) ? " bg-primary-pale/40 dark:bg-primary/10" : ""}`}>
+              {leadsPageRows.map((l) => (
+                <tr
+                  key={l.id}
+                  className={`group border-t border-line/60 dark:border-d-line/60 text-[14px] hover:bg-canvas-soft/60 dark:hover:bg-d-canvas-soft/60 transition-colors${selected.has(l.id) ? " bg-primary-pale/40 dark:bg-primary/10" : ""}`}
+                >
                   <td className="py-3.5 pl-5 pr-3"><Checkbox checked={selected.has(l.id)} onChange={(on) => toggleOne(l.id, on)} /></td>
                   <td className="py-3.5 px-3">
                     <div className="font-semibold text-ink dark:text-d-ink truncate max-w-[220px]">{l.businessName}</div>
                     {l.campaignName && (
-                      <Link href={`/googlemaps/${l.campaignId}`} className="text-[12px] text-mute hover:text-ink dark:hover:text-d-ink mt-0.5 inline-flex items-center gap-1">
+                      <Link
+                        href={`/googlemaps/${l.campaignId}`}
+                        className="text-[12px] text-mute hover:text-ink dark:hover:text-d-ink mt-0.5 inline-flex items-center gap-1"
+                      >
                         <MapPin size={10} /> {l.campaignName}
                       </Link>
                     )}
                   </td>
                   <td className="py-3.5 px-3">
-                    {l.phone ? (
-                      <a href={`tel:${l.phone}`} className="text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink tabular-nums inline-flex items-center gap-1.5">
-                        <Phone size={12} className="text-mute" />{l.phone}
-                      </a>
-                    ) : <span className="text-mute">—</span>}
+                    {l.phone
+                      ? <a href={`tel:${l.phone}`} className="text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink tabular-nums inline-flex items-center gap-1.5"><Phone size={12} className="text-mute" />{l.phone}</a>
+                      : <span className="text-mute">—</span>}
                   </td>
                   <td className="py-3.5 px-3">
-                    {l.websiteUrl ? (
-                      <a href={l.websiteUrl} target="_blank" rel="noreferrer" className="text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink inline-flex items-center gap-1 max-w-[180px] truncate">
-                        {l.normalizedDomain ?? l.websiteUrl}<ExternalLink size={11} className="text-mute shrink-0" />
-                      </a>
-                    ) : <span className="text-mute">—</span>}
+                    {l.email
+                      ? <a href={`mailto:${l.email}`} className="text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink inline-flex items-center gap-1.5 max-w-[200px] truncate"><Mail size={12} className="text-mute shrink-0" />{l.email}</a>
+                      : <span className="text-mute">—</span>}
+                  </td>
+                  <td className="py-3.5 px-3">
+                    {l.websiteUrl
+                      ? <a href={l.websiteUrl} target="_blank" rel="noreferrer" className="text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink inline-flex items-center gap-1 max-w-[180px] truncate">{l.normalizedDomain ?? l.websiteUrl}<ExternalLink size={11} className="text-mute shrink-0" /></a>
+                      : <span className="text-mute">—</span>}
                   </td>
                   <td className="py-3.5 px-3 max-w-[260px]">
-                    <div className="text-[13px] text-body dark:text-d-body line-clamp-1 max-w-[240px]">{l.notes ?? <span className="text-mute italic">—</span>}</div>
+                    {l.notes ? (
+                      <button
+                        onClick={() => setNotesLead(l)}
+                        className="text-[13px] text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink line-clamp-1 max-w-[240px] text-left"
+                      >
+                        {l.notes}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setNotesLead(l)}
+                        className="text-[13px] text-mute inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 hover:text-ink dark:hover:text-d-ink transition-opacity"
+                      >
+                        <StickyNote size={11} /> Add note
+                      </button>
+                    )}
                   </td>
                   <td className="py-3.5 px-3 text-right">
-                    <span className="text-[15px] font-bold tabular-nums text-positive">{formatMoney(l.raised ?? 0)}</span>
+                    <button
+                      onClick={() => setEarningLead(l)}
+                      className="group/earn inline-flex items-center gap-1 hover:opacity-80 transition-opacity"
+                    >
+                      <DollarSign size={12} className="text-positive opacity-0 group-hover/earn:opacity-100 transition-opacity" />
+                      <span className="text-[15px] font-bold tabular-nums text-positive">{formatMoney(l.raised ?? 0)}</span>
+                    </button>
                   </td>
                   <td className="py-3.5 px-3 pr-5 text-right text-[12px] text-mute">
                     {l.createdAt ? new Date(l.createdAt).toLocaleDateString() : "—"}
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={7} className="py-16 text-center text-mute text-sm">No winning leads yet. Close some deals first.</td></tr>
+              {filteredLeads.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-16 text-center text-mute text-sm">
+                    {closedLeads.length === 0 ? "No winning leads yet — close some deals to see them here." : "No leads match your filters."}
+                  </td>
+                </tr>
               )}
             </tbody>
-            {filtered.length > 0 && (
+            {filteredLeads.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-line dark:border-d-line text-[13px] font-semibold bg-canvas-soft/40 dark:bg-d-canvas-soft/40">
                   <td className="py-3 pl-5 pr-3" />
-                  <td className="py-3 px-3 text-ink dark:text-d-ink" colSpan={4}>
-                    {filtered.length === closedLeads.length ? "Total raised" : "Filtered total"}
+                  <td className="py-3 px-3 text-ink dark:text-d-ink" colSpan={5}>
+                    {filteredLeads.length === closedLeads.length ? "Total raised" : "Filtered total"}
                   </td>
                   <td className="py-3 px-3 text-right tabular-nums text-positive text-[16px]">{formatMoney(filteredEarnings)}</td>
                   <td className="py-3 px-3 pr-5" />
@@ -267,6 +514,34 @@ export default function DashboardPage() {
             )}
           </table>
         </div>
+        {filteredLeads.length > LEADS_PAGE_SIZE && (
+          <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-t border-line dark:border-d-line text-[13px]">
+            <div className="text-mute">
+              Showing{" "}
+              <span className="text-ink dark:text-d-ink font-medium">
+                {(leadsSafePage - 1) * LEADS_PAGE_SIZE + 1}–{Math.min(filteredLeads.length, leadsSafePage * LEADS_PAGE_SIZE)}
+              </span>{" "}
+              of {filteredLeads.length}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setLeadsPage((p) => Math.max(1, p - 1))}
+                disabled={leadsSafePage === 1}
+                className="p-1.5 rounded-[10px] hover:bg-canvas-soft dark:hover:bg-d-canvas-soft text-ink dark:text-d-ink disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <div className="px-2 text-mute">Page <span className="text-ink dark:text-d-ink font-medium">{leadsSafePage}</span> of {leadsTotalPages}</div>
+              <button
+                onClick={() => setLeadsPage((p) => Math.min(leadsTotalPages, p + 1))}
+                disabled={leadsSafePage === leadsTotalPages}
+                className="p-1.5 rounded-[10px] hover:bg-canvas-soft dark:hover:bg-d-canvas-soft text-ink dark:text-d-ink disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </Card>
 
       <BulkActionsBar
@@ -281,9 +556,69 @@ export default function DashboardPage() {
             ],
           },
           { type: "divider" },
-          { type: "button", label: "Remove", icon: <Trash2 size={14} />, danger: true, onClick: () => setSelected(new Set()) },
+          {
+            type: "button", label: "Remove", icon: <Trash2 size={14} />, danger: true,
+            onClick: async () => {
+              await Promise.all(
+                Array.from(selected).map((id) =>
+                  fetch(`/api/leads/${id}`, { method: "DELETE" })
+                )
+              );
+              setSelected(new Set());
+              qc.invalidateQueries({ queryKey: ["closed-leads"] });
+              qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+            },
+          },
         ]}
       />
+
+      {notesLead && (
+        <NotesModal
+          open={!!notesLead}
+          lead={notesLead}
+          onClose={() => setNotesLead(null)}
+          onSave={async (notes) => {
+            await fetch(`/api/leads/${notesLead.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ notes }),
+            });
+            qc.invalidateQueries({ queryKey: ["closed-leads"] });
+            setNotesLead(null);
+          }}
+        />
+      )}
+
+      {earningLead && (
+        <AddEarningModal
+          open={!!earningLead}
+          lead={earningLead}
+          onClose={() => setEarningLead(null)}
+          onSave={async (amount) => {
+            const newRaised = (earningLead.raised ?? 0) + amount;
+            await fetch(`/api/leads/${earningLead.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ raised: newRaised }),
+            });
+            qc.invalidateQueries({ queryKey: ["closed-leads"] });
+            qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+            setEarningLead(null);
+          }}
+        />
+      )}
+
+      {/* ── Global Run History ── */}
+      <SectionLabel className="mt-12" title="Run history" hint="Every scrape run, across every campaign" />
+      <div className="mt-3">
+        <RunHistoryCard
+          title="All runs"
+          subtitle={allRuns.length === 0 ? "No runs yet — start a campaign to see runs here" : undefined}
+          runs={allRuns}
+          showCampaign
+          onOpenCampaign={(id) => router.push(`/googlemaps/${id}`)}
+        />
+      </div>
     </div>
   );
 }

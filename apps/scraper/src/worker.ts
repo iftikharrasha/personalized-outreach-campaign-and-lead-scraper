@@ -5,6 +5,8 @@ import { db } from "./db.js";
 import { logger } from "./logger.js";
 import { enrichLeads, writeLeadEmail } from "./enrich.js";
 import type { LeadForEnrichment } from "./enrich.js";
+import { runYelpFetch } from "./yelp-fetch.js";
+import { YelpApiError, YelpMissingKeyError } from "./yelp-client.js";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -147,10 +149,12 @@ async function markFailed(runId: string, errorMessage: string, durationSec: numb
   });
 }
 
-export async function processJob(job: ScrapeRun) {
+// ── Google Maps scrape job ─────────────────────────────────────────────────────
+
+async function processGoogleMapsJob(job: ScrapeRun) {
   const startedAt = Date.now();
   const userAgent = pickUserAgent();
-  logger.info("processing job", { runId: job.id, keyword: job.keywordUsed, userAgent: userAgent.slice(0, 40) + "…" });
+  logger.info("processing gmaps job", { runId: job.id, keyword: job.keywordUsed, userAgent: userAgent.slice(0, 40) + "…" });
 
   const { scrapeGoogleMaps } = await import("./google-maps.js");
   const { createBatchProcessor } = await import("./dedupe.js");
@@ -176,36 +180,112 @@ export async function processJob(job: ScrapeRun) {
 
     const durationSec = Math.round((Date.now() - startedAt) / 1000);
 
-    // If the scrape exited because the user pressed Stop, leave the run
-    // CANCELLED — do NOT overwrite it with COMPLETED.
     if (wasCancelled()) {
-      logger.info("job cancelled by user", { runId: job.id, durationSec });
+      logger.info("gmaps job cancelled by user", { runId: job.id, durationSec });
       await db.scrapeRun.update({ where: { id: job.id }, data: { durationSec } });
     } else {
       await markCompleted(job.id, durationSec);
-      logger.info("job completed", { runId: job.id, durationSec });
+      logger.info("gmaps job completed", { runId: job.id, durationSec });
     }
   } catch (err) {
     const durationSec = Math.round((Date.now() - startedAt) / 1000);
 
     if (err instanceof CancelledError) {
-      logger.info("job cancelled", { runId: job.id });
+      logger.info("gmaps job cancelled", { runId: job.id });
       await db.scrapeRun.update({ where: { id: job.id }, data: { durationSec } });
 
     } else if (err instanceof BlockedError) {
       const msg = `Blocked by Google: ${err.blockType} (${err.severity})`;
-      logger.warn("job blocked", { runId: job.id, blockType: err.blockType, severity: err.severity });
+      logger.warn("gmaps job blocked", { runId: job.id, blockType: err.blockType, severity: err.severity });
       await markFailed(job.id, msg, durationSec);
 
     } else {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error("job failed", { runId: job.id, error: message });
+      logger.error("gmaps job failed", { runId: job.id, error: message });
       await markFailed(job.id, message, durationSec);
     }
   } finally {
     if (browser) {
       try { await browser.close(); } catch { /* best-effort */ }
     }
+  }
+}
+
+// ── Yelp API fetch job ─────────────────────────────────────────────────────────
+
+async function processYelpJob(job: ScrapeRun) {
+  const startedAt = Date.now();
+  logger.info("processing yelp job", { runId: job.id, keyword: job.keywordUsed });
+
+  const fetchCount = job.yelpFetchCount ?? 50;
+
+  try {
+    const campaign = await db.campaign.findUniqueOrThrow({ where: { id: job.campaignId } });
+
+    const { createBatchProcessor } = await import("./dedupe.js");
+    const { onBatch, finish, wasCancelled } = createBatchProcessor(job);
+
+    await runYelpFetch(
+      campaign,
+      fetchCount,
+      job.id,
+      onBatch,
+      async () => {
+        const current = await db.scrapeRun.findUnique({
+          where:  { id: job.id },
+          select: { status: true },
+        });
+        return current?.status === "CANCELLED";
+      },
+    );
+
+    await finish();
+
+    const durationSec = Math.round((Date.now() - startedAt) / 1000);
+
+    if (wasCancelled()) {
+      logger.info("yelp job cancelled by user", { runId: job.id, durationSec });
+      await db.scrapeRun.update({ where: { id: job.id }, data: { durationSec } });
+    } else {
+      await markCompleted(job.id, durationSec);
+      logger.info("yelp job completed", { runId: job.id, durationSec });
+    }
+  } catch (err) {
+    const durationSec = Math.round((Date.now() - startedAt) / 1000);
+
+    if (err instanceof CancelledError) {
+      logger.info("yelp job cancelled", { runId: job.id });
+      await db.scrapeRun.update({ where: { id: job.id }, data: { durationSec } });
+
+    } else if (err instanceof YelpMissingKeyError) {
+      logger.warn("yelp job: missing API key", { runId: job.id });
+      await markFailed(job.id, err.message, durationSec);
+
+    } else if (err instanceof YelpApiError) {
+      logger.warn("yelp job: API error", { runId: job.id, error: err.message });
+      await markFailed(job.id, err.message, durationSec);
+
+    } else {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("yelp job failed", { runId: job.id, error: message });
+      await markFailed(job.id, message, durationSec);
+    }
+  }
+}
+
+// ── Source dispatch ────────────────────────────────────────────────────────────
+
+export async function processJob(job: ScrapeRun) {
+  // Load campaign source to decide which processor to use
+  const campaign = await db.campaign.findUnique({
+    where:  { id: job.campaignId },
+    select: { source: true },
+  });
+
+  if (campaign?.source === "yelp") {
+    await processYelpJob(job);
+  } else {
+    await processGoogleMapsJob(job);
   }
 }
 

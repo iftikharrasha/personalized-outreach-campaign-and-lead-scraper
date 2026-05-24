@@ -8,14 +8,21 @@ import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { CATEGORIES, COUNTRIES, STATES_BY_COUNTRY } from "@/lib/constants";
 import type { Campaign } from "@prisma/client";
-import { Archive, Check, Mail, Search, X } from "lucide-react";
+import { Archive, Check, Lock, Mail, Search, X } from "lucide-react";
+
+// Augment until Prisma client regenerates after DLL lock is released
+type CampaignWithYelp = Campaign & {
+  apiOffset:         number;
+  apiKeywordUsed:    string | null;
+  apiTotalAvailable: number | null;
+};
 import * as React from "react";
 
 interface Props {
-  open: boolean;
-  campaign: Campaign | null;
-  onClose: () => void;
-  onSaved: () => void;
+  open:       boolean;
+  campaign:   CampaignWithYelp | null;
+  onClose:    () => void;
+  onSaved:    () => void;
   onArchived: () => void;
 }
 
@@ -46,6 +53,9 @@ export function EditCampaignModal({ open, campaign, onClose, onSaved, onArchived
   }, [open, campaign]);
 
   if (!campaign) return null;
+
+  const isYelp           = campaign.source === "yelp";
+  const yelpKeywordLocked = isYelp && campaign.apiOffset > 0;
 
   const derivedKeyword = () => {
     const base = category === "custom"
@@ -131,26 +141,27 @@ export function EditCampaignModal({ open, campaign, onClose, onSaved, onArchived
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Give it a memorable name" />
         </Field>
 
-        <Field label="What to scrape">
-          <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+        <Field label={isYelp ? "Yelp search keyword" : "What to scrape"}
+               hint={yelpKeywordLocked ? "Keyword is locked — this campaign is a cursor into one specific Yelp search." : undefined}>
+          <Select value={category} onChange={(e) => setCategory(e.target.value)} disabled={yelpKeywordLocked}>
             {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </Select>
         </Field>
 
         {category === "custom" && (
-          <Field label="Custom keyword" error={errors.keyword}>
-            <Input value={customKeyword} onChange={(e) => setCustomKeyword(e.target.value)} placeholder="vegan bakeries" />
+          <Field label={isYelp ? "Custom Yelp keyword" : "Custom keyword"} error={errors.keyword}>
+            <Input value={customKeyword} onChange={(e) => setCustomKeyword(e.target.value)} placeholder="vegan bakeries" disabled={yelpKeywordLocked} />
           </Field>
         )}
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Country">
-            <Select value={country} onChange={(e) => { setCountry(e.target.value); setState(STATES_BY_COUNTRY[e.target.value]?.[0] ?? ""); }}>
+            <Select value={country} onChange={(e) => { setCountry(e.target.value); setState(STATES_BY_COUNTRY[e.target.value]?.[0] ?? ""); }} disabled={yelpKeywordLocked}>
               {COUNTRIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </Select>
           </Field>
           <Field label="State / Region">
-            <Select value={state} onChange={(e) => setState(e.target.value)}>
+            <Select value={state} onChange={(e) => setState(e.target.value)} disabled={yelpKeywordLocked}>
               {(STATES_BY_COUNTRY[country] ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
           </Field>
@@ -158,10 +169,28 @@ export function EditCampaignModal({ open, campaign, onClose, onSaved, onArchived
 
         {!entireState && (
           <Field label="City" error={errors.city}>
-            <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="San Diego" />
+            <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="San Diego" disabled={yelpKeywordLocked} />
           </Field>
         )}
-        <Checkbox checked={entireState} onChange={setEntireState} label={`Scrape entire ${state}`} />
+        {!isYelp && (
+          <Checkbox checked={entireState} onChange={setEntireState} label={`Scrape entire ${state}`} />
+        )}
+
+        {/* Yelp keyword-lock info box */}
+        {yelpKeywordLocked && (
+          <div className="rounded-[14px] bg-canvas-soft dark:bg-d-canvas-soft border border-line dark:border-d-line p-3.5 flex items-start gap-2.5">
+            <Lock size={13} className="text-mute mt-0.5 shrink-0" />
+            <div className="text-[12.5px] text-body dark:text-d-body leading-relaxed">
+              <span className="font-semibold text-ink dark:text-d-ink">Search is locked.</span>{" "}
+              This Yelp campaign has fetched{" "}
+              <span className="tabular-nums font-medium">{campaign.apiOffset.toLocaleString()}</span> businesses
+              {campaign.apiTotalAvailable != null && (
+                <> of <span className="tabular-nums font-medium">{campaign.apiTotalAvailable.toLocaleString()}</span></>
+              )}.
+              {" "}To search a different keyword, create a new campaign.
+            </div>
+          </div>
+        )}
 
         <div className="h-px bg-line dark:bg-d-line my-1" />
 
@@ -178,7 +207,7 @@ export function EditCampaignModal({ open, campaign, onClose, onSaved, onArchived
         <div className="rounded-[14px] bg-canvas-soft dark:bg-d-canvas-soft p-3 flex items-start gap-3">
           <div className="mt-0.5 text-mute"><Search size={16} /></div>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-mute font-semibold">Google Maps query</div>
+            <div className="text-[11px] uppercase tracking-wide text-mute font-semibold">{isYelp ? "Yelp search query" : "Google Maps query"}</div>
             <div className="text-[14px] font-medium text-ink dark:text-d-ink mt-0.5 truncate">
               {derivedKeyword() || <span className="text-mute italic">Fill in the fields above…</span>}
             </div>

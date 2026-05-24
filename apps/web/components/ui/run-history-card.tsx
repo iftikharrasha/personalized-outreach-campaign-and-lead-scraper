@@ -1,6 +1,6 @@
 "use client";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronUp, History } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, History } from "lucide-react";
 import * as React from "react";
 import { Badge } from "./badge";
 import { Card } from "./card";
@@ -43,7 +43,7 @@ const runTone = (status: RunEntry["status"]) => {
 };
 
 function RunHistoryTable({ runs, showCampaign = false, onOpenCampaign }: Pick<RunHistoryCardProps, "runs" | "showCampaign" | "onOpenCampaign">) {
-  const colCount = showCampaign ? 7 : 6;
+  const colCount = showCampaign ? 6 : 5;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left">
@@ -53,7 +53,6 @@ function RunHistoryTable({ runs, showCampaign = false, onOpenCampaign }: Pick<Ru
             <th className={cn("py-2.5 px-3", !showCampaign && "pl-5")}>Started</th>
             <th className="py-2.5 px-3 text-right">New</th>
             <th className="py-2.5 px-3 text-right">Dupes</th>
-            <th className="py-2.5 px-3">Notes</th>
             <th className="py-2.5 px-3 text-right">Duration</th>
             <th className="py-2.5 px-3 pr-5 text-right">Status</th>
           </tr>
@@ -74,7 +73,6 @@ function RunHistoryTable({ runs, showCampaign = false, onOpenCampaign }: Pick<Ru
               <td className={cn("py-3 px-3 text-ink dark:text-d-ink", !showCampaign && "pl-5")}>{r.startedAt}</td>
               <td className="py-3 px-3 text-right tabular-nums text-ink dark:text-d-ink font-medium">{r.newLeads}</td>
               <td className="py-3 px-3 text-right tabular-nums text-mute">{r.dupes}</td>
-              <td className="py-3 px-3 text-[12.5px] text-mute max-w-[280px] truncate">{r.error ?? "—"}</td>
               <td className="py-3 px-3 text-right tabular-nums text-mute">{fmtDuration(r.durationSec)}</td>
               <td className="py-3 px-3 pr-5 text-right">
                 <Badge size="sm" tone={runTone(r.status)}>{r.status}</Badge>
@@ -90,8 +88,18 @@ function RunHistoryTable({ runs, showCampaign = false, onOpenCampaign }: Pick<Ru
   );
 }
 
+const PAGE_SIZE = 10;
+
 export function RunHistoryCard({ title = "Run history", subtitle, runs, showCampaign, onOpenCampaign, defaultOpen = true }: RunHistoryCardProps) {
   const [open, setOpen] = React.useState(defaultOpen);
+  const [page, setPage] = React.useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(runs.length / PAGE_SIZE));
+  const safePage   = Math.min(page, totalPages);
+  const pageRuns   = runs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  React.useEffect(() => { setPage(1); }, [runs.length]);
+
   return (
     <Card>
       <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between px-6 py-4 text-left">
@@ -106,7 +114,35 @@ export function RunHistoryCard({ title = "Run history", subtitle, runs, showCamp
       </button>
       {open && (
         <div className="px-2 pb-2 animate-fadein">
-          <RunHistoryTable runs={runs} showCampaign={showCampaign} onOpenCampaign={onOpenCampaign} />
+          <RunHistoryTable runs={pageRuns} showCampaign={showCampaign} onOpenCampaign={onOpenCampaign} />
+          {runs.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-4 px-3 py-3 border-t border-line dark:border-d-line text-[13px]">
+              <div className="text-mute">
+                Showing{" "}
+                <span className="text-ink dark:text-d-ink font-medium">
+                  {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(runs.length, safePage * PAGE_SIZE)}
+                </span>{" "}
+                of {runs.length}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage === 1}
+                  className="p-1.5 rounded-[10px] hover:bg-canvas-soft dark:hover:bg-d-canvas-soft text-ink dark:text-d-ink disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <div className="px-2 text-mute">Page <span className="text-ink dark:text-d-ink font-medium">{safePage}</span> of {totalPages}</div>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={safePage === totalPages}
+                  className="p-1.5 rounded-[10px] hover:bg-canvas-soft dark:hover:bg-d-canvas-soft text-ink dark:text-d-ink disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </Card>

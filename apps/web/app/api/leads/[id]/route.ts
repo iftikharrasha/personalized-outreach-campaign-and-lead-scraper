@@ -7,7 +7,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
 
-  const { status, notes, email, businessName, phone, websiteUrl, address } = body;
+  const { status, notes, email, businessName, phone, websiteUrl, address, raised } = body;
 
   if (status && !Object.values(LeadStatus).includes(status))
     return NextResponse.json({ error: "invalid status" }, { status: 422 });
@@ -25,6 +25,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       ...(phone        !== undefined && { phone }),
       ...(websiteUrl   !== undefined && { websiteUrl }),
       ...(address      !== undefined && { address }),
+      ...(raised       !== undefined && { raised: typeof raised === "number" ? raised : parseInt(raised, 10) }),
     },
   });
 
@@ -44,4 +45,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   return NextResponse.json(updated);
+}
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const existing = await db.lead.findUnique({ where: { id } });
+  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  await db.lead.delete({ where: { id } });
+  return new NextResponse(null, { status: 204 });
 }

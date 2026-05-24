@@ -54,6 +54,10 @@ const IconDollar  = (p) => (<Icon {...p}><line x1="12" x2="12" y1="2" y2="22"/><
 const IconLink    = (p) => (<Icon {...p}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></Icon>);
 const IconNetwork = (p) => (<Icon {...p}><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7.5 10.5 16M16 7.5 13.5 16M8.5 6h7"/></Icon>);
 const IconCoffee  = (p) => (<Icon {...p}><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M6 2v3M10 2v3M14 2v3"/></Icon>);
+const IconLock    = (p) => (<Icon {...p}><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></Icon>);
+const IconClock   = (p) => (<Icon {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></Icon>);
+const IconInfo    = (p) => (<Icon {...p}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></Icon>);
+const IconKey     = (p) => (<Icon {...p}><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></Icon>);
 
 // Logo mark — abstract pin + green dot
 const LogoMark = ({ size = 28 }) => (
@@ -73,5 +77,6 @@ Object.assign(window, {
   IconRotate, IconMoreH, IconArrowRight, IconSparkles, IconHistory, IconGlobe, IconUser,
   IconMail, IconHome, IconLayout,
   IconStar, IconBriefcase, IconBuilding, IconDollar, IconLink, IconNetwork, IconCoffee,
+  IconLock, IconClock, IconInfo, IconKey,
   LogoMark,
 });

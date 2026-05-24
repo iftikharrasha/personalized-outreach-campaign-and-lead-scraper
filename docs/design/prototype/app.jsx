@@ -20,6 +20,8 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "showEmptyState": false,
   "simulateScraping": false,
   "simulateEnrichment": false,
+  "simulateYelpFetch": false,
+  "yelpApiKeyMissing": false,
   "compactSidebar": false
 }/*EDITMODE-END*/;
 
@@ -55,6 +57,13 @@ function App() {
   const [enrichmentCampaignId, setEnrichmentCampaignId] = useState(null);
   const [justFoundIds, setJustFoundIds] = useState(new Set());
   const justFoundTimersRef = useRef(new Map());
+
+  // Yelp fetch — which campaign the active fetch targets, and which leads
+  // just landed from the API (used to flash the row, same vocabulary as the
+  // enrichment "just-found" pattern).
+  const [yelpCampaignId, setYelpCampaignId] = useState(null);
+  const [yelpJustFetchedIds, setYelpJustFetchedIds] = useState(new Set());
+  const yelpJustFetchedTimersRef = useRef(new Map());
 
   const toast = useToast();
 
@@ -189,7 +198,7 @@ function App() {
   useEffect(() => {
     if (t.simulateEnrichment && !enrichRun && route.name === 'detail') {
       const c = campaigns.find((x) => x.id === route.id);
-      if (!c || c.source !== 'gmaps') { setTweak('simulateEnrichment', false); return; }
+      if (!c || (c.source !== 'gmaps' && c.source !== 'yelp')) { setTweak('simulateEnrichment', false); return; }
       const candidates = (leadsByCampaign[c.id] || []).filter((l) => !l.email).slice(0, 12);
       if (!candidates.length) {
         toast.show({ type: 'warning', title: 'Nothing to enrich', message: 'Every lead in this campaign already has an email.' });
@@ -199,6 +208,146 @@ function App() {
       findEmailsForLeads(candidates.map((l) => l.id));
     }
   }, [t.simulateEnrichment, route]);
+
+  // ---- Yelp fetch engine -----------------------------------------------
+  // Mirrors the Phase 6 enrichment hookup. Each batch callback synthesizes
+  // new lead rows from YELP_FETCH_POOL (so the user sees data land live in
+  // the leads table), advances the campaign's apiOffset, and marks the
+  // newly-arrived row ids for the row-flash animation.
+
+  const markYelpJustFetched = (leadId) => {
+    setYelpJustFetchedIds((prev) => { const next = new Set(prev); next.add(leadId); return next; });
+    const prevTimer = yelpJustFetchedTimersRef.current.get(leadId);
+    if (prevTimer) clearTimeout(prevTimer);
+    const handle = setTimeout(() => {
+      setYelpJustFetchedIds((prev) => { const next = new Set(prev); next.delete(leadId); return next; });
+      yelpJustFetchedTimersRef.current.delete(leadId);
+    }, 2400);
+    yelpJustFetchedTimersRef.current.set(leadId, handle);
+  };
+
+  // Generate one new Yelp lead row from the synthetic pool. The pool is
+  // looped over (with a random salt suffix) so a long fetch run never runs
+  // out of names.
+  const synthYelpLead = (campaignId, indexHint) => {
+    const pool = window.YELP_FETCH_POOL || [];
+    if (!pool.length) return null;
+    const r = pool[indexHint % pool.length];
+    const salt = Math.floor(Math.random() * 9000) + 1000;
+    return {
+      id: 'yl_' + campaignId + '_' + salt,
+      campaignId,
+      source: 'yelp',
+      name: r[0],
+      phone: r[1],
+      website: r[2],
+      rating: r[3],
+      reviews: r[4],
+      price: r[5],
+      primaryCategory: r[6],
+      neighborhood: r[7],
+      claimed: r[8],
+      email: '',
+      status: 'NEW',
+      notes: '',
+      addedAt: 'just now',
+    };
+  };
+
+  const { run: yelpRun, elapsedMs: yelpElapsedMs, startRun: startYelpRun, cancelRun: cancelYelpRun } =
+    (window.useYelpFetchSimulator || (() => ({})))({
+      getCampaignById: (id) => campaigns.find((c) => c.id === id) || null,
+      onBatch: ({ campaignId, newLeads, duplicates, offsetAfter }) => {
+        // Synthesize new lead rows for the table.
+        setLeadsByCampaign((prev) => {
+          const existing = prev[campaignId] || [];
+          const added = [];
+          for (let i = 0; i < newLeads; i++) {
+            const l = synthYelpLead(campaignId, existing.length + added.length + i);
+            if (l) added.push(l);
+          }
+          added.forEach((l) => markYelpJustFetched(l.id));
+          return { ...prev, [campaignId]: [...added, ...existing] };
+        });
+        // Advance the campaign's totalLeads counter so the stat card reflects
+        // the new rows. apiOffset is updated on completion to keep the run
+        // "atomic" from the user's perspective (matches how the worker
+        // persists per-batch in real life — close enough for this prototype).
+        setCampaigns((cs) => cs.map((c) =>
+          c.id === campaignId
+            ? { ...c, totalLeads: c.totalLeads + newLeads, newSinceLast: c.newSinceLast + newLeads, apiOffset: offsetAfter }
+            : c
+        ));
+      },
+      onComplete: ({ campaignId, fetched, newLeads, duplicates, finalOffset, apiTotalAvailable, durationMs }) => {
+        setYelpCampaignId(null);
+        setTweak('simulateYelpFetch', false);
+        setCampaigns((cs) => cs.map((c) => {
+          if (c.id !== campaignId) return c;
+          return {
+            ...c,
+            apiOffset: finalOffset,
+            apiTotalAvailable: c.apiTotalAvailable != null ? c.apiTotalAvailable : apiTotalAvailable,
+            apiKeywordUsed: c.apiKeywordUsed || c.keyword,
+            lastRun: 'just now',
+          };
+        }));
+        const time = window.formatYelpDuration ? window.formatYelpDuration(durationMs) : '';
+        toast.show({
+          type: 'success',
+          title: `Fetched ${fetched} businesses`,
+          message: `${newLeads} new lead${newLeads === 1 ? '' : 's'} added · ${duplicates} already in this campaign · ${time}.`,
+        });
+      },
+      onCancel: ({ campaignId, fetched, newLeads, finalOffset, durationMs }) => {
+        setYelpCampaignId(null);
+        setTweak('simulateYelpFetch', false);
+        setCampaigns((cs) => cs.map((c) =>
+          c.id === campaignId ? { ...c, apiOffset: finalOffset, lastRun: 'just now' } : c
+        ));
+        const time = window.formatYelpDuration ? window.formatYelpDuration(durationMs) : '';
+        toast.show({
+          type: 'warning',
+          title: 'Fetch stopped',
+          message: `Cancelled at ${time}. Kept ${newLeads} new lead${newLeads === 1 ? '' : 's'} · cursor saved at offset ${finalOffset}.`,
+        });
+      },
+    });
+
+  const startYelpFetch = (campaign, fetchCount) => {
+    if (yelpRun) {
+      toast.show({ type: 'warning', title: 'Yelp fetch already running', message: 'Wait for the current fetch to finish or stop it first.' });
+      return;
+    }
+    setYelpCampaignId(campaign.id);
+    startYelpRun({
+      campaignId: campaign.id,
+      fetchCount,
+      startingOffset: campaign.apiOffset || 0,
+      initialTotal: campaign.apiTotalAvailable,
+    });
+  };
+
+  // React to the Tweaks “Simulate Yelp fetch” toggle. Picks the currently
+  // visible Yelp campaign and runs a default-sized fetch through it.
+  useEffect(() => {
+    if (t.simulateYelpFetch && !yelpRun && route.name === 'detail') {
+      const c = campaigns.find((x) => x.id === route.id);
+      if (!c || c.source !== 'yelp') { setTweak('simulateYelpFetch', false); return; }
+      if (t.yelpApiKeyMissing) {
+        toast.show({ type: 'warning', title: 'No Yelp API key', message: 'Toggle off “Simulate missing API key” in Tweaks to run a fetch.' });
+        setTweak('simulateYelpFetch', false);
+        return;
+      }
+      const remaining = c.apiTotalAvailable != null ? Math.max(0, c.apiTotalAvailable - (c.apiOffset || 0)) : 250;
+      if (remaining <= 0) {
+        toast.show({ type: 'warning', title: 'Nothing to fetch', message: 'All available Yelp businesses for this search are already in the leads table.' });
+        setTweak('simulateYelpFetch', false);
+        return;
+      }
+      startYelpFetch(c, Math.min(remaining, 150));
+    }
+  }, [t.simulateYelpFetch, route]);
 
   // Publish sidebar width as a CSS variable so the floating bulk-action pill
   // can center itself against the content area, not the viewport.
@@ -248,10 +397,21 @@ function App() {
 
   // Campaign mutations
   const openRunModal = (c) => setRunModal(c);
-  const startRun = (mode) => {
+  // gmaps + linkedin route to RunCampaignModal (append/replace radio).
+  // Yelp routes to YelpRunModal (fetch-count input + cursor states).
+  const startRun = (modeOrPayload) => {
     const c = runModal;
     setRunModal(null);
     if (!c) return;
+    if (c.source === 'yelp') {
+      // payload from YelpRunModal: { fetchCount }
+      const fetchCount = modeOrPayload?.fetchCount || 100;
+      goDetail(c);
+      toast.show({ type: 'success', title: 'Yelp fetch started', message: `Fetching up to ${fetchCount} businesses for “${c.keyword}”…` });
+      startYelpFetch(c, fetchCount);
+      return;
+    }
+    const mode = modeOrPayload;
     if (mode === 'replace') {
       toast.show({ type: 'warning', title: 'Replacing all leads', message: `Deleted ${c.totalLeads} leads. Scraping started.` });
     } else {
@@ -409,6 +569,10 @@ function App() {
               enrichJustFound={justFoundIds}
               onFindEmails={findEmailsForLeads}
               onStopEnrich={cancelEnrichRun}
+              yelpRun={yelpCampaignId === currentCampaign.id ? yelpRun : null}
+              yelpElapsedMs={yelpElapsedMs}
+              yelpJustFetched={yelpJustFetchedIds}
+              onStopYelpFetch={cancelYelpRun}
             />
           ) : (
             <div className="px-8 py-24 text-center text-mute">Campaign not found. <button className="text-ink dark:text-d-ink underline" onClick={() => goList('gmaps')}>Back to campaigns</button></div>
@@ -422,6 +586,7 @@ function App() {
         source={currentSource}
         onClose={() => setCreateOpen(false)}
         onCreate={createCampaign}
+        yelpApiKeyMissing={t.yelpApiKeyMissing}
       />
       <EditCampaignModal
         open={!!editingCampaign}
@@ -430,12 +595,27 @@ function App() {
         onSave={saveCampaignEdit}
         onArchive={(c) => { archiveCampaign(c); goList(); }}
       />
-      <RunCampaignModal
-        open={!!runModal}
-        campaign={runModal}
-        onClose={() => setRunModal(null)}
-        onStart={startRun}
-      />
+      {/* Run modal is source-branched. Yelp opens YelpRunModal; gmaps +
+          linkedin keep RunCampaignModal. Both call onStart(payload) and
+          the App distinguishes by payload shape. */}
+      {runModal?.source === 'yelp' ? (
+        window.YelpRunModal ? (
+          <YelpRunModal
+            open={!!runModal}
+            campaign={runModal}
+            onClose={() => setRunModal(null)}
+            onStart={startRun}
+            apiKeyMissing={t.yelpApiKeyMissing}
+          />
+        ) : null
+      ) : (
+        <RunCampaignModal
+          open={!!runModal}
+          campaign={runModal}
+          onClose={() => setRunModal(null)}
+          onStart={startRun}
+        />
+      )}
 
       {/* Tweaks panel */}
       {window.TweaksPanel && (
@@ -468,6 +648,18 @@ function App() {
               label="Simulate email enrichment"
               value={t.simulateEnrichment}
               onChange={(v) => setTweak('simulateEnrichment', v)}
+            />
+          </TweakSection>
+          <TweakSection label="Yelp API">
+            <TweakToggle
+              label="Simulate Yelp fetch"
+              value={t.simulateYelpFetch}
+              onChange={(v) => setTweak('simulateYelpFetch', v)}
+            />
+            <TweakToggle
+              label="Simulate missing API key"
+              value={t.yelpApiKeyMissing}
+              onChange={(v) => setTweak('yelpApiKeyMissing', v)}
             />
           </TweakSection>
           <TweakSection label="Theme">

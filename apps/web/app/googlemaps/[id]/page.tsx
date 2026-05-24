@@ -78,7 +78,14 @@ interface LeadStats {
   contacted:  number;
   conversion: number;
 }
-type CampaignWithStats = Campaign & { stats: LeadStats };
+// apiOffset / apiKeywordUsed / apiTotalAvailable added by migration 20260522231355.
+// Prisma client type will include them once the DLL lock is released and `prisma generate` runs.
+type CampaignWithStats = Campaign & {
+  stats:             LeadStats;
+  apiOffset:         number;
+  apiKeywordUsed:    string | null;
+  apiTotalAvailable: number | null;
+};
 
 function LeadRow({
   lead, selected, onToggle, onStatusChange, onEditNotes, onEditEmail,
@@ -248,19 +255,28 @@ function fmtElapsed(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function ScrapingBanner({ run }: { run: RunStatus }) {
-  const isActive = run.status === "PENDING" || run.status === "RUNNING";
-  const isFailed = run.status === "FAILED";
+function ScrapingBanner({ run, onDismiss }: { run: RunStatus; onDismiss: () => void }) {
+  const isActive    = run.status === "PENDING" || run.status === "RUNNING";
+  const isCompleted = run.status === "COMPLETED";
+  const isFailed    = run.status === "FAILED";
   const isCancelled = run.status === "CANCELLED";
 
-  if (!isActive && !isFailed && !isCancelled) return null;
+  if (!isActive && !isCompleted && !isFailed && !isCancelled) return null;
+
+  const DismissBtn = () => (
+    <button
+      onClick={onDismiss}
+      className="shrink-0 p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors text-current opacity-60 hover:opacity-100"
+      aria-label="Dismiss"
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+    </button>
+  );
 
   // ── Active scrape — amber card matching the prototype design ─────────────
   if (isActive) {
     return (
-      <div
-        className="mt-6 rounded-[10px] bg-[#fff7d6] dark:bg-[#3a3206] border border-warning/40 px-5 py-4 flex items-center gap-4 animate-fadein"
-      >
+      <div className="mt-6 rounded-[10px] bg-[#fff7d6] dark:bg-[#3a3206] border border-warning/40 px-5 py-4 flex items-center gap-4 animate-fadein">
         <div className="w-10 h-10 rounded-full bg-warning/30 flex items-center justify-center text-[#7a4500] dark:text-warning shrink-0">
           <Sparkles size={20} />
         </div>
@@ -287,6 +303,19 @@ function ScrapingBanner({ run }: { run: RunStatus }) {
     );
   }
 
+  // ── Completed — green success row ────────────────────────────────────────
+  if (isCompleted) {
+    return (
+      <div className="mt-6 flex items-center gap-3 rounded-[10px] px-5 py-3.5 text-[14px] bg-positive/10 border border-positive/30 text-ink dark:text-d-ink">
+        <span className="text-positive shrink-0">✓</span>
+        <span className="font-medium flex-1">
+          Scrape complete — {run.newLeadsCount} new lead{run.newLeadsCount === 1 ? "" : "s"} added, {run.duplicateCount} duplicate{run.duplicateCount === 1 ? "" : "s"} skipped
+        </span>
+        <DismissBtn />
+      </div>
+    );
+  }
+
   // ── Failed / cancelled — compact status row ──────────────────────────────
   return (
     <div className={`mt-6 flex items-center gap-3 rounded-[10px] px-5 py-3.5 text-[14px] ${
@@ -296,7 +325,7 @@ function ScrapingBanner({ run }: { run: RunStatus }) {
     }`}>
       {isFailed    && <span className="text-negative shrink-0">✕</span>}
       {isCancelled && <Square size={14} className="shrink-0" />}
-      <span className="font-medium">
+      <span className="font-medium flex-1">
         {isFailed && (() => {
           const msg = run.errorMessage ?? "Unknown error";
           if (msg.includes("CAPTCHA"))    return "Blocked by Google: CAPTCHA detected. Try again in a few hours or use a different network.";
@@ -306,6 +335,7 @@ function ScrapingBanner({ run }: { run: RunStatus }) {
         })()}
         {isCancelled && `Stopped — ${run.newLeadsCount} lead${run.newLeadsCount === 1 ? "" : "s"} saved`}
       </span>
+      <DismissBtn />
     </div>
   );
 }
@@ -510,29 +540,22 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
     prevStatusRef.current = activeRun.status;
 
     if (prev !== "COMPLETED" && activeRun.status === "COMPLETED") {
-      toast.show({
-        type: "success",
-        title: "Scrape complete",
-        message: `Added ${activeRun.newLeadsCount} new lead${activeRun.newLeadsCount === 1 ? "" : "s"}, skipped ${activeRun.duplicateCount} duplicate${activeRun.duplicateCount === 1 ? "" : "s"}.`,
-      });
       qc.invalidateQueries({ queryKey: ["leads", id] });
       qc.invalidateQueries({ queryKey: ["campaign", id] });
       qc.invalidateQueries({ queryKey: ["scrapeRuns", id] });
-      setActiveRunId(null);
+      // Banner stays visible — user dismisses it manually
     }
 
     if (prev !== "FAILED" && activeRun.status === "FAILED") {
-      toast.show({ type: "error", title: "Scrape failed", message: activeRun.errorMessage ?? "Unknown error" });
       qc.invalidateQueries({ queryKey: ["scrapeRuns", id] });
-      setActiveRunId(null);
+      // Banner stays visible — user dismisses it manually
     }
 
     if (prev !== "CANCELLED" && activeRun.status === "CANCELLED") {
-      toast.show({ type: "warning", title: "Scrape stopped", message: `Stopped with ${activeRun.newLeadsCount} lead${activeRun.newLeadsCount === 1 ? "" : "s"} saved.` });
       qc.invalidateQueries({ queryKey: ["leads", id] });
       qc.invalidateQueries({ queryKey: ["campaign", id] });
       qc.invalidateQueries({ queryKey: ["scrapeRuns", id] });
-      setActiveRunId(null);
+      // Banner stays visible — user dismisses it manually
     }
   }, [activeRun, id, qc, toast]);
 
@@ -863,7 +886,7 @@ function CampaignDetailContent({ params }: { params: Promise<{ id: string }> }) 
       </div>
 
       {/* Scraping banner */}
-      {activeRun && <ScrapingBanner run={activeRun} />}
+      {activeRun && <ScrapingBanner run={activeRun} onDismiss={() => setActiveRunId(null)} />}
 
       {/* Enrichment banner — shown while an enrichment run is active */}
       {activeEnrich && (activeEnrich.status === "PENDING" || activeEnrich.status === "RUNNING") && (

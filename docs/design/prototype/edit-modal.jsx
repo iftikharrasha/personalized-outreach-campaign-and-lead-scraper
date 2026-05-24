@@ -5,6 +5,10 @@
 // finishes or fails. Email is optional; if blank, no notifications go out.
 
 function EditCampaignModal({ open, campaign, onClose, onSave, onArchive }) {
+  // Yelp campaigns lock their keyword after the first run. `isYelp` +
+  // `yelpKeywordLocked` gate the category/custom-keyword fields below.
+  const isYelp = campaign?.source === 'yelp';
+  const yelpKeywordLocked = isYelp && (campaign?.apiOffset || 0) > 0;
   const [name, setName] = useState('');
   const [category, setCategory] = useState('restaurants');
   const [customKeyword, setCustomKeyword] = useState('');
@@ -44,9 +48,6 @@ function EditCampaignModal({ open, campaign, onClose, onSave, onArchive }) {
     if (!name.trim()) errs.name = 'Campaign name is required';
     if (category === 'custom' && !customKeyword.trim()) errs.keyword = 'Enter a custom keyword';
     if (!entireState && !city.trim()) errs.city = 'City is required (or pick Entire State)';
-    if (notifyEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(notifyEmail.trim())) {
-      errs.email = 'That doesn\'t look like a valid email';
-    }
     return errs;
   };
 
@@ -62,7 +63,6 @@ function EditCampaignModal({ open, campaign, onClose, onSave, onArchive }) {
       country,
       state,
       city: entireState ? '' : city.trim(),
-      notifyEmail: notifyEmail.trim(),
     });
   };
 
@@ -72,8 +72,7 @@ function EditCampaignModal({ open, campaign, onClose, onSave, onArchive }) {
     derivedKeyword() !== campaign.keyword ||
     country !== campaign.country ||
     state !== campaign.state ||
-    (entireState ? '' : city) !== (campaign.city || '') ||
-    notifyEmail.trim() !== (campaign.notifyEmail || '');
+    (entireState ? '' : city) !== (campaign.city || '');
 
   return (
     <Modal open={open} onClose={onClose} width={580}>
@@ -90,15 +89,15 @@ function EditCampaignModal({ open, campaign, onClose, onSave, onArchive }) {
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Give it a memorable name" />
         </Field>
 
-        <Field label="What to scrape">
-          <Select value={category} onChange={(e) => setCategory(e.target.value)}>
-            {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+        <Field label={isYelp ? 'Yelp search keyword' : 'What to scrape'} hint={yelpKeywordLocked ? 'Yelp keyword is locked once a search has started — the campaign is a cursor into one specific search. To search something else, create a new campaign.' : null}>
+          <Select value={category} onChange={(e) => setCategory(e.target.value)} disabled={yelpKeywordLocked}>
+            {(isYelp ? (window.CATEGORIES_BY_SOURCE?.yelp || CATEGORIES) : CATEGORIES).map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
           </Select>
         </Field>
 
         {category === 'custom' && (
-          <Field label="Custom keyword" error={errors.keyword}>
-            <Input value={customKeyword} onChange={(e) => setCustomKeyword(e.target.value)} placeholder="vegan bakeries" />
+          <Field label={isYelp ? 'Custom Yelp keyword' : 'Custom keyword'} error={errors.keyword}>
+            <Input value={customKeyword} onChange={(e) => setCustomKeyword(e.target.value)} placeholder="vegan bakeries" disabled={yelpKeywordLocked} />
           </Field>
         )}
 
@@ -117,26 +116,21 @@ function EditCampaignModal({ open, campaign, onClose, onSave, onArchive }) {
 
         {!entireState && (
           <Field label="City" error={errors.city}>
-            <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="San Diego" />
+            <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="San Diego" disabled={yelpKeywordLocked} />
           </Field>
         )}
-        <Checkbox checked={entireState} onChange={setEntireState} label={`Scrape entire ${state}`} />
+        {!isYelp && (
+          <Checkbox checked={entireState} onChange={setEntireState} label={`Scrape entire ${state}`} />
+        )}
 
-        <div className="h-px bg-line dark:bg-d-line my-1" />
-
-        <Field
-          label="Client email"
-          hint="We don't scrape emails from Google Maps — add it here once the prospect shares it."
-          error={errors.email}
-        >
-          <Input
-            type="email"
-            value={notifyEmail}
-            onChange={(e) => setNotifyEmail(e.target.value)}
-            placeholder="client@example.com"
-            leftIcon={<IconMail size={16} />}
-          />
-        </Field>
+        {yelpKeywordLocked && (
+          <div className="rounded-[14px] bg-canvas-soft dark:bg-d-canvas-soft border border-line dark:border-d-line p-3.5 flex items-start gap-2.5">
+            <span className="text-mute mt-0.5"><IconLock size={14} /></span>
+            <div className="text-[12.5px] text-body dark:text-d-body leading-relaxed">
+              <span className="font-semibold text-ink dark:text-d-ink">Search is locked.</span> This Yelp campaign has fetched <span className="tabular-nums font-medium">{(campaign.apiOffset || 0).toLocaleString()}</span> businesses already — to search something else, create a new campaign.
+            </div>
+          </div>
+        )}
 
         {/* Query preview chip */}
         <div className="rounded-[14px] bg-canvas-soft dark:bg-d-canvas-soft p-3 flex items-start gap-3">

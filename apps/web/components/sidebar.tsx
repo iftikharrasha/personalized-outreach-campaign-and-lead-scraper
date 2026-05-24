@@ -1,18 +1,27 @@
 "use client";
 import { cn } from "@/lib/utils";
-import { ChevronsLeft, Globe, LayoutDashboard, MapPin, User } from "lucide-react";
+import { ChevronsLeft, LayoutDashboard, MapPin, User } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoMark } from "./logo";
 
+// Yelp icon — inline SVG to match the brand mark exactly
+function YelpIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.5 13.5c-.2.7-.9 1.1-1.6.9l-2.5-.7c-.7-.2-1.1-.9-.9-1.6l1.5-5.4c.1-.3.4-.4.6-.2l3.3 5.4c.2.3.2.8-.4 1.6zm6.4-1.8l-2.1 1.5c-.6.4-1.4.3-1.8-.3l-3.3-5.4c-.1-.2 0-.5.3-.5l5.6-.4c.7-.1 1.4.5 1.4 1.2v2.6c0 .5-.5 1.1-.1 1.3zm-1.6-6.3l-2.7 1.2c-.3.1-.5-.1-.4-.4l.7-2.9c.2-.7.9-1.1 1.6-.9.7.2 1.1.9.9 1.6l-.1.4z" />
+    </svg>
+  );
+}
+
 const items = [
   { id: "home",  href: "/",           icon: <LayoutDashboard size={20} />, label: "Outrich Manager" },
-  { id: "gmaps", href: "/googlemaps", icon: <MapPin size={20} />,          label: "Google Maps Scraper" },
+  { id: "gmaps", href: "/googlemaps", icon: <MapPin size={20} />,          label: "Google Maps" },
+  { id: "yelp",  href: "/yelp",       icon: <YelpIcon size={20} />,        label: "Yelp" },
 ];
 
 const futureItems = [
-  { id: "yelp",     icon: <Globe size={20} />, label: "Yelp" },
-  { id: "linkedin", icon: <User size={20} />,  label: "LinkedIn" },
+  { id: "linkedin", icon: <User size={20} />, label: "LinkedIn" },
 ];
 
 interface SidebarProps {
@@ -22,7 +31,13 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
-  const activeId = pathname === "/" ? "home" : pathname.startsWith("/googlemaps") ? "gmaps" : "";
+  const activeId = pathname === "/"
+    ? "home"
+    : pathname.startsWith("/googlemaps")
+    ? "gmaps"
+    : pathname.startsWith("/yelp")
+    ? "yelp"
+    : "";
 
   return (
     <aside

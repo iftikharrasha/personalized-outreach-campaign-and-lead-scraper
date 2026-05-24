@@ -20,6 +20,40 @@ interface PreparedLead {
   address:          string | null;
 }
 
+interface LeadFilter {
+  phone:       "required" | "optional";
+  website:     "required" | "optional";
+  contactMode: "either"   | "both";
+}
+
+function parseLeadFilter(raw: string | null): LeadFilter | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as LeadFilter;
+  } catch {
+    return null;
+  }
+}
+
+function passesLeadFilter(lead: RawLead, filter: LeadFilter | null): boolean {
+  if (!filter) return true;
+  const hasPhone   = !!normalizePhone(lead.phone);
+  const hasWebsite = !!normalizeDomain(lead.websiteUrl);
+
+  if (filter.phone === "required" && !hasPhone)     return false;
+  if (filter.website === "required" && !hasWebsite) return false;
+
+  if (filter.contactMode === "both") {
+    return hasPhone && hasWebsite;
+  }
+  if (filter.contactMode === "either") {
+    if (filter.phone === "optional" && filter.website === "optional") {
+      return hasPhone || hasWebsite;
+    }
+  }
+  return true;
+}
+
 // Returns an onBatch callback to pass to scrapeGoogleMaps.
 // Each scroll's new leads are immediately deduped and flushed to the DB.
 // Returns true from the callback to signal the scraper to stop (cancellation).
@@ -28,6 +62,9 @@ export function createBatchProcessor(job: ScrapeRun): {
   finish:       () => Promise<void>;
   wasCancelled: () => boolean;
 } {
+  // leadFilter is a new column — cast until prisma generate updates the types
+  const leadFilter = parseLeadFilter(((job as unknown) as { leadFilter?: string | null }).leadFilter ?? null);
+
   // In-memory seen sets — loaded once before first batch, updated as leads are inserted
   const existingDomains = new Set<string>();
   const existingPhones  = new Set<string>();
@@ -59,6 +96,12 @@ export function createBatchProcessor(job: ScrapeRun): {
     let batchDupes = 0;
 
     for (const raw of rawBatch) {
+      // Lead quality filter — skip leads that don't meet the user's criteria
+      if (!passesLeadFilter(raw, leadFilter)) {
+        logger.debug("lead filtered out by quality rules", { businessName: raw.businessName });
+        continue;
+      }
+
       const normalizedDomain = normalizeDomain(raw.websiteUrl);
       const normalizedPhone  = normalizePhone(raw.phone);
       const normalizedName   = normalizeBusinessName(raw.businessName);

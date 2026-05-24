@@ -17,13 +17,13 @@
 
 | # | Slice | Status |
 |---|---|---|
-| 7.1 | Campaign cursor columns + migration (`apiOffset`, `apiKeywordUsed`, `apiTotalAvailable`) | NOT STARTED |
-| 7.2 | Yelp API client (`yelp-client.ts`) — fetch, paginate, normalize to `RawLead` | NOT STARTED |
-| 7.3 | Yelp fetcher (`yelp-fetch.ts`) — offset resumption, batch loop, progress | NOT STARTED |
-| 7.4 | Worker source dispatch — route a run to Maps scraper or Yelp fetcher | NOT STARTED |
-| 7.5 | Create-campaign UI — source selector + Yelp-conditional fields | NOT STARTED |
-| 7.6 | `YelpRunModal` — first-run / resume, fetch-count input, error states | NOT STARTED |
-| 7.7 | Campaign card + Edit modal — Yelp badge, fetch progress, keyword lock | NOT STARTED |
+| 7.1 | Campaign cursor columns + migration (`apiOffset`, `apiKeywordUsed`, `apiTotalAvailable`) | COMPLETED |
+| 7.2 | Yelp API client (`yelp-client.ts`) — fetch, paginate, normalize to `RawLead` | COMPLETED |
+| 7.3 | Yelp fetcher (`yelp-fetch.ts`) — offset resumption, batch loop, progress | COMPLETED |
+| 7.4 | Worker source dispatch — route a run to Maps scraper or Yelp fetcher | COMPLETED |
+| 7.5 | Create-campaign UI — source selector + Yelp-conditional fields | COMPLETED |
+| 7.6 | `YelpRunModal` — first-run / resume, fetch-count input, error states | COMPLETED |
+| 7.7 | Campaign card + Edit modal — Yelp badge, fetch progress, keyword lock | COMPLETED |
 | 7.8 | Tests — API client, fetcher resumption, worker dispatch, error handling | NOT STARTED |
 
 ---
@@ -527,7 +527,7 @@ block — a clear message, no automatic retry.
 
 ### Slice 7.1 — Campaign cursor columns + migration
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - Add `apiOffset` (int, default 0), `apiKeywordUsed` (string?),
   `apiTotalAvailable` (int?) to the `Campaign` model (§6).
@@ -539,7 +539,7 @@ block — a clear message, no automatic retry.
 
 ### Slice 7.2 — Yelp API client
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 `apps/scraper/src/yelp-client.ts`.
 
@@ -556,7 +556,7 @@ phone, multi-line address, missing website.
 
 ### Slice 7.3 — Yelp fetcher
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 `apps/scraper/src/yelp-fetch.ts`.
 
@@ -573,7 +573,7 @@ mocked client; assert `apiOffset` persists per batch.
 
 ### Slice 7.4 — Worker source dispatch
 
-**Status:** NOT STARTED
+**Status:** COMPLETED
 
 - In the worker's scrape-job handling, branch on `campaign.source`:
   `"google_maps"` → existing scraper, `"yelp"` → `processYelpJob` (§10).

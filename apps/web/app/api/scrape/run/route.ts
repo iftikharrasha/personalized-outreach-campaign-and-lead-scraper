@@ -7,12 +7,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "campaignId required" }, { status: 400 });
   }
 
-  const { campaignId, replaceAll } = body as { campaignId: string; replaceAll?: boolean };
+  const { campaignId, replaceAll, yelpFetchCount, leadFilter } = body as {
+    campaignId:     string;
+    replaceAll?:    boolean;
+    yelpFetchCount?: number;
+    leadFilter?:    { phone: "required" | "optional"; website: "required" | "optional"; contactMode: "either" | "both" };
+  };
 
   const campaign = await db.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   if (campaign.status === "ARCHIVED") {
     return NextResponse.json({ error: "Cannot run an archived campaign" }, { status: 422 });
+  }
+
+  // Yelp campaigns require a fetch count
+  if (campaign.source === "yelp" && (!yelpFetchCount || yelpFetchCount < 1)) {
+    return NextResponse.json({ error: "yelpFetchCount required for Yelp campaigns" }, { status: 400 });
   }
 
   // Check for an already-active run
@@ -31,8 +41,10 @@ export async function POST(req: NextRequest) {
   const run = await db.scrapeRun.create({
     data: {
       campaignId,
-      keywordUsed: campaign.keyword,
-      status:      "PENDING",
+      keywordUsed:    campaign.keyword,
+      status:         "PENDING",
+      yelpFetchCount: campaign.source === "yelp" ? (yelpFetchCount ?? null) : null,
+      leadFilter:     leadFilter ? JSON.stringify(leadFilter) : null,
     },
   });
 

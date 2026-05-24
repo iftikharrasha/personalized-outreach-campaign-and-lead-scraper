@@ -52,12 +52,16 @@ model Campaign {
   country     String         @db.VarChar(100)
   state       String         @db.VarChar(100)
   city        String?        @db.VarChar(100)
-  source      String         @default("google_maps") @db.VarChar(50)
-  status      CampaignStatus @default(ACTIVE)
-  notifyEmail String?        @map("notify_email") @db.VarChar(255)
-  totalLeads  Int            @default(0) @map("total_leads")
-  createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime       @updatedAt @map("updated_at")
+  source              String         @default("google_maps") @db.VarChar(50)
+  status              CampaignStatus @default(ACTIVE)
+  notifyEmail         String?        @map("notify_email") @db.VarChar(255)
+  totalLeads          Int            @default(0) @map("total_leads")
+  // Yelp cursor — only meaningful when source = "yelp"
+  apiOffset           Int            @default(0) @map("api_offset")
+  apiKeywordUsed      String?        @map("api_keyword_used") @db.VarChar(500)
+  apiTotalAvailable   Int?           @map("api_total_available")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
 
   leads          Lead[]
   scrapeRuns     ScrapeRun[]
@@ -101,17 +105,21 @@ model Lead {
 }
 
 model ScrapeRun {
-  id             String          @id @default(uuid()) @db.Uuid
-  campaignId     String          @map("campaign_id") @db.Uuid
-  keywordUsed    String          @map("keyword_used") @db.VarChar(500)
-  startedAt      DateTime?       @map("started_at")
-  finishedAt     DateTime?       @map("finished_at")
-  status         ScrapeRunStatus @default(PENDING)
-  newLeadsCount  Int             @default(0) @map("new_leads_count")
-  duplicateCount Int             @default(0) @map("duplicate_count")
-  durationSec    Int?            @map("duration_sec")
-  errorMessage   String?         @map("error_message")
-  createdAt      DateTime        @default(now()) @map("created_at")
+  id              String          @id @default(uuid()) @db.Uuid
+  campaignId      String          @map("campaign_id") @db.Uuid
+  keywordUsed     String          @map("keyword_used") @db.VarChar(500)
+  startedAt       DateTime?       @map("started_at")
+  finishedAt      DateTime?       @map("finished_at")
+  status          ScrapeRunStatus @default(PENDING)
+  newLeadsCount   Int             @default(0) @map("new_leads_count")
+  duplicateCount  Int             @default(0) @map("duplicate_count")
+  durationSec     Int?            @map("duration_sec")
+  errorMessage    String?         @map("error_message")
+  // Yelp only — how many businesses the user asked to fetch this run
+  yelpFetchCount  Int?            @map("yelp_fetch_count")
+  // Lead quality filter — JSON string: { phone, website, contactMode }
+  leadFilter      String?         @map("lead_filter")
+  createdAt       DateTime        @default(now()) @map("created_at")
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   leads    Lead[]

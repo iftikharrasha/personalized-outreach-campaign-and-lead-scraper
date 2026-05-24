@@ -24,17 +24,24 @@ const SOURCES = {
   yelp: {
     id: 'yelp',
     label: 'Yelp',
-    sidebar: 'Yelp Scraper',
-    breadcrumb: 'Yelp Scraper',
+    sidebar: 'Yelp API',
+    breadcrumb: 'Yelp API',
     queryLabel: 'Yelp search',
-    queryHint:  'Yelp uses category + city/neighborhood. Same shape as the URL bar on yelp.com.',
+    queryHint:  'Yelp uses category + city. Same shape as the URL bar on yelp.com — fetched via the Yelp Fusion API.',
     locationKind: 'city',
     leadEntity:   'businesses',
     leadEntityOne:'business',
     statePlaceholder: 'Brooklyn',
+    // Phase 7 — Yelp uses the Fusion API, NOT scraping. Copy reflects that:
+    // no CAPTCHAs, no proxy talk, no “scroll the results panel.” It is plain
+    // HTTP, paginated, capped at 1,000 businesses per search.
     emptyTitle: 'No Yelp campaigns yet',
-    emptyBody:  'Each campaign is one Yelp category in one city or neighborhood. The scraper pulls business cards from the results panel exactly like a person scrolling.',
-    blockedCopy:'Yelp showed a CAPTCHA last run. Sit out the cooldown before retrying.',
+    emptyBody:  'Each campaign is one Yelp search — one keyword in one city. Outrich fetches the data through the official Yelp Fusion API, paginated 50 at a time, up to 1,000 businesses per search.',
+    blockedCopy:'Yelp rate-limited last run (5,000 requests/day). Resume tomorrow — your cursor is preserved.',
+    // Yelp-specific microcopy used by the run banner + card progress line.
+    actionVerb: 'Fetch',         // “Fetch from Yelp”, “Fetching…”
+    actionVerbPast: 'fetched',   // “500 fetched”
+    runModalTitle: 'Fetch from Yelp',
   },
   linkedin: {
     id: 'linkedin',
@@ -227,6 +234,12 @@ const seedCampaigns = [
   //   yelp.com/search?find_desc={keyword}&find_loc={location}
   // Extra fields per business: price level ($–$$$$), rating, review count,
   // category list, neighborhood, claimed-vs-unclaimed flag.
+  // Yelp campaigns now carry the Phase 7 cursor fields:
+  //   apiOffset          — next offset to fetch (multiple of 50)
+  //   apiKeywordUsed     — keyword the cursor is valid for (locked after run 1)
+  //   apiTotalAvailable  — Yelp's reported total for this search (null pre-run)
+  // Four campaigns demo the four UI states: resume mid-cursor, fully fetched,
+  // paused mid-cursor, and never-run-yet (first-run modal copy).
   {
     id: 'y1',
     source: 'yelp',
@@ -239,6 +252,7 @@ const seedCampaigns = [
     lastRun: '3h ago',
     progress: 35,
     notifyEmail: 'you@outrich.app',
+    apiOffset: 100, apiTotalAvailable: 312, apiKeywordUsed: 'coffee in Brooklyn, NY',
   },
   {
     id: 'y2',
@@ -252,6 +266,9 @@ const seedCampaigns = [
     lastRun: '1d ago',
     progress: 28,
     notifyEmail: '',
+    // Fully fetched — apiOffset has reached apiTotalAvailable. Run button
+    // shows the “all businesses fetched” state in the YelpRunModal.
+    apiOffset: 200, apiTotalAvailable: 200, apiKeywordUsed: 'fine dining in Miami, FL',
   },
   {
     id: 'y3',
@@ -265,6 +282,7 @@ const seedCampaigns = [
     lastRun: '2d ago',
     progress: 27,
     notifyEmail: '',
+    apiOffset: 150, apiTotalAvailable: 720, apiKeywordUsed: 'nail salons in Austin, TX',
   },
   {
     id: 'y4',
@@ -274,10 +292,13 @@ const seedCampaigns = [
     category: 'home_services',
     country: 'US', state: 'Colorado', city: 'Denver',
     status: 'ACTIVE',
-    totalLeads: 49, contacted: 11, newSinceLast: 18,
-    lastRun: '6h ago',
-    progress: 22,
+    // Never run — totalLeads 0, apiOffset 0, apiTotalAvailable null.
+    // Used to demo the first-run modal copy ("up to 1,000 businesses").
+    totalLeads: 0, contacted: 0, newSinceLast: 0,
+    lastRun: 'never',
+    progress: 0,
     notifyEmail: '',
+    apiOffset: 0, apiTotalAvailable: null, apiKeywordUsed: null,
   },
 
   // ── LinkedIn campaigns ──

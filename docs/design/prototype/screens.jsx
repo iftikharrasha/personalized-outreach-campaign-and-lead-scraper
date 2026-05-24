@@ -202,8 +202,25 @@ function CampaignCard({ c, onOpen, onRun, onPause, onRestore, onArchive }) {
       {/* Top: name + menu */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
+          {/* Yelp-API source pill — lives above the campaign name so it's the
+              first thing the eye lands on. Sets expectations for the modal
+              that opens when they hit Run (different from gmaps + linkedin). */}
+          {isYelp && (
+            <div className="mb-1.5">
+              <span className="inline-flex items-center gap-1 text-[10.5px] uppercase tracking-wider font-semibold text-primary-deep bg-primary-pale rounded-full px-2 py-0.5">
+                <IconStar size={10} /> Yelp API
+              </span>
+            </div>
+          )}
           <h3 className="text-[17px] font-semibold text-ink dark:text-d-ink leading-snug truncate">{c.name}</h3>
-          <div className="text-[13px] text-mute mt-0.5 truncate">{c.keyword}</div>
+          <div className="text-[13px] text-mute mt-0.5 truncate flex items-center gap-1.5">
+            <span className="truncate">{c.keyword}</span>
+            {isYelp && (c.apiOffset || 0) > 0 && (
+              <span className="shrink-0 inline-flex items-center gap-0.5 text-mute" title="Keyword is locked — this Yelp campaign is bound to one search.">
+                <IconLock size={10} />
+              </span>
+            )}
+          </div>
         </div>
         <Menu
           trigger={
@@ -247,11 +264,17 @@ function CampaignCard({ c, onOpen, onRun, onPause, onRestore, onArchive }) {
         </div>
       </div>
 
-      {/* Footer line */}
-      <div className="text-[12px] text-mute flex items-center gap-1.5">
-        <IconHistory size={12} />
-        Last run {c.lastRun} · <span className="text-positive font-medium">+{c.newSinceLast} new</span>
-      </div>
+      {/* Footer line — Yelp campaigns show the cursor progress instead of
+          the generic "+N new" delta; the cursor is the honest source of
+          truth for what's been fetched. */}
+      {isYelp ? (
+        window.YelpProgressLine ? <YelpProgressLine campaign={c} /> : null
+      ) : (
+        <div className="text-[12px] text-mute flex items-center gap-1.5">
+          <IconHistory size={12} />
+          Last run {c.lastRun} · <span className="text-positive font-medium">+{c.newSinceLast} new</span>
+        </div>
+      )}
 
       {/* Buttons */}
       <div className="flex items-center gap-2 pt-1">
@@ -319,12 +342,14 @@ function CampaignListPage({ campaigns, onOpen, onRun, onCreate, onPause, onResto
 
   const totalLeads = campaigns.reduce((s, c) => s + c.totalLeads, 0);
   const noun = src.leadEntity;
+  // Yelp uses "fetched", not "scraped" — it's an API adapter, not a scraper.
+  const verbPast = source === 'yelp' ? 'fetched' : source === 'linkedin' ? 'collected' : 'scraped';
 
   return (
     <div className="px-8 py-10 max-w-[1480px] mx-auto">
       <PageHeader
         title={`${src.label} campaigns`}
-        subtitle={`${counts.active} active · ${totalLeads.toLocaleString()} ${noun} scraped`}
+        subtitle={`${counts.active} active · ${totalLeads.toLocaleString()} ${noun} ${verbPast}`}
         actions={
         <Button variant="primary" size="lg" leftIcon={<IconPlus size={16} />} onClick={onCreate}>
             New Campaign
@@ -411,10 +436,11 @@ function EmptyState({ onCreate, source = 'gmaps' }) {
 }
 
 // ── Create Campaign modal ──
-function CreateCampaignModal({ open, onClose, onCreate, source = 'gmaps' }) {
+function CreateCampaignModal({ open, onClose, onCreate, source = 'gmaps', yelpApiKeyMissing }) {
   const src = SOURCES[source] || SOURCES.gmaps;
   const cats = CATEGORIES_BY_SOURCE[source] || CATEGORIES_BY_SOURCE.gmaps;
   const isLinkedIn = source === 'linkedin';
+  const isYelp     = source === 'yelp';
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState(cats[0].value);
@@ -435,7 +461,9 @@ function CreateCampaignModal({ open, onClose, onCreate, source = 'gmaps' }) {
       setName('');
       setCategory(cats[0].value);
       setCustomKeyword('');
-      setCountry('US'); setState('California'); setCity(''); setEntireState(false);
+      setCountry('US'); setState('California'); setCity('');
+      // Yelp forces city + disables entire-state.
+      setEntireState(isYelp ? false : false);
       setMetro(LINKEDIN_METROS[0]); setIndustry(LINKEDIN_INDUSTRIES[0]); setSeniority(LINKEDIN_SENIORITY[0]);
       setErrors({});
     }
@@ -462,7 +490,9 @@ function CreateCampaignModal({ open, onClose, onCreate, source = 'gmaps' }) {
     const errs = {};
     if (!name.trim()) errs.name = 'Campaign name is required';
     if (category === 'custom' && !customKeyword.trim()) errs.keyword = isLinkedIn ? 'Enter a custom title' : 'Enter a custom keyword';
-    if (!isLinkedIn && !entireState && !city.trim()) errs.city = 'City is required (or pick Entire State)';
+    // Yelp: City is required — the Yelp API can't search a whole state (§4).
+    if (isYelp && !city.trim()) errs.city = 'City is required for Yelp (the API can’t search a whole state)';
+    else if (!isLinkedIn && !entireState && !city.trim()) errs.city = 'City is required (or pick Entire State)';
     setErrors(errs);
     if (Object.keys(errs).length) return;
 
@@ -488,22 +518,43 @@ function CreateCampaignModal({ open, onClose, onCreate, source = 'gmaps' }) {
     <Modal open={open} onClose={onClose} width={560}>
       <div className="flex items-start justify-between mb-5">
         <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            {isYelp && (
+              <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wider font-semibold text-primary-deep bg-primary-pale rounded-full px-2 py-0.5">
+                <IconStar size={11} /> Yelp · API
+              </span>
+            )}
+          </div>
           <h2 className="text-[22px] font-semibold text-ink dark:text-d-ink">New {src.label} campaign</h2>
           <p className="text-[13px] text-mute mt-1">
             {isLinkedIn
               ? 'One campaign = one job title + one metro. Industry narrows the result set further.'
+              : isYelp
+              ? 'One campaign = one Yelp search (one keyword in one city). Fetched through the official Yelp Fusion API.'
               : 'One campaign = one search keyword + one location.'}
           </p>
         </div>
         <button onClick={onClose} className="text-mute hover:text-ink dark:hover:text-d-ink p-1"><IconX size={18} /></button>
       </div>
 
+      {/* No-API-key warning — inline so the user doesn't build a Yelp
+          campaign that can never run (§7, §13). Allowed to create either
+          way; the run is what gets blocked downstream. */}
+      {isYelp && yelpApiKeyMissing && (
+        <div className="mb-5 rounded-[14px] bg-red-50 dark:bg-red-900/20 border border-red-200/60 dark:border-red-800/60 p-3.5 flex items-start gap-2.5">
+          <span className="text-negative mt-0.5"><IconAlert size={15} /></span>
+          <div className="text-[12.5px] text-[#a7000d] dark:text-red-300 leading-relaxed">
+            <strong className="font-semibold">No Yelp API key configured.</strong> You can still create this campaign, but you won’t be able to run it until <span className="font-mono text-[11px]">YELP_API_KEY</span> is set in <span className="font-mono text-[11px]">.env</span>.
+          </div>
+        </div>
+      )}
+
       <div className="space-y-4">
         <Field label="Campaign name" hint={isLinkedIn ? 'e.g. "SF Bay Area Founders"' : 'e.g. "San Diego Restaurants"'} error={errors.name}>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Give it a memorable name" />
         </Field>
 
-        <Field label={isLinkedIn ? 'Target role' : 'What to scrape'}>
+        <Field label={isLinkedIn ? 'Target role' : isYelp ? 'What to search' : 'What to scrape'}>
           <Select value={category} onChange={(e) => setCategory(e.target.value)}>
             {cats.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </Select>
@@ -557,11 +608,19 @@ function CreateCampaignModal({ open, onClose, onCreate, source = 'gmaps' }) {
             </div>
 
             {!entireState &&
-              <Field label={source === 'yelp' ? 'City or neighborhood' : 'City'} error={errors.city}>
+              <Field label={source === 'yelp' ? 'City' : 'City'} hint={isYelp ? 'Yelp searches by City + State only — e.g. "San Diego, CA". No statewide searches.' : null} error={errors.city}>
                 <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder={src.statePlaceholder} />
               </Field>
             }
-            <Checkbox checked={entireState} onChange={setEntireState} label={`Scrape entire ${state}`} />
+            {/* Entire-state is gmaps-only — Yelp's API requires a city. */}
+            {!isYelp && (
+              <Checkbox checked={entireState} onChange={setEntireState} label={`Scrape entire ${state}`} />
+            )}
+            {isYelp && (
+              <div className="flex items-center gap-2 text-[11.5px] text-mute">
+                <IconLock size={11} /> Entire-state search isn’t available on Yelp
+              </div>
+            )}
           </>
         )}
 

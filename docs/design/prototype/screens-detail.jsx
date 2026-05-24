@@ -8,7 +8,7 @@
 // Stat cards, scraping banner, run history card, bulk actions stay identical
 // across sources — that's the spine of the design.
 
-function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit, scraping, onStopScraping, scrapingFound, onLeadStatusChange, onLeadNotesChange, onLeadEmailChange, onExport, enrichRun, enrichElapsedMs, enrichJustFound, onFindEmails, onStopEnrich }) {
+function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit, scraping, onStopScraping, scrapingFound, onLeadStatusChange, onLeadNotesChange, onLeadEmailChange, onExport, enrichRun, enrichElapsedMs, enrichJustFound, onFindEmails, onStopEnrich, yelpRun, yelpElapsedMs, onStopYelpFetch, yelpJustFetched }) {
   const src = SOURCES[campaign.source] || SOURCES.gmaps;
   const isYelp     = campaign.source === 'yelp';
   const isLinkedIn = campaign.source === 'linkedin';
@@ -117,9 +117,12 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
           <Button variant="destructive" size="md" onClick={onStopScraping} leftIcon={<IconStop size={14} />}>
               Stop scraping
             </Button> :
-
-          <Button variant="primary" size="md" onClick={onRun} leftIcon={<IconPlay size={14} />}>
-              Run campaign
+          yelpRun ?
+          <Button variant="destructive" size="md" onClick={onStopYelpFetch} leftIcon={<IconStop size={14} />}>
+              Stop fetching
+            </Button> :
+          <Button variant="primary" size="md" onClick={onRun} leftIcon={isYelp ? <IconNetwork size={14} /> : <IconPlay size={14} />}>
+              {isYelp ? 'Fetch from Yelp' : 'Run campaign'}
             </Button>
           }
           <Menu
@@ -135,10 +138,22 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
         </div>
       </div>
 
+      {/* Yelp fetch banner — appears during an active Yelp API fetch. Sits
+          above the scraping banner; only one of them can ever be active for
+          a given campaign (a campaign's source is fixed). */}
+      {yelpRun && campaign.source === 'yelp' && window.YelpFetchBanner && (
+        <YelpFetchBanner
+          run={yelpRun}
+          elapsedMs={yelpElapsedMs}
+          onStop={onStopYelpFetch}
+          campaignName={campaign.name}
+        />
+      )}
+
       {/* Email enrichment banner — appears whenever an EnrichmentRun is
-          active for this campaign. Sits above the scraping banner because
-          both can theoretically coexist (different worker job types). */}
-      {enrichRun && campaign.source === 'gmaps' && (
+          active for this campaign. Both gmaps + yelp campaigns can be
+          enriched (Yelp leads carry websiteUrl per Phase 7 §3). */}
+      {enrichRun && (campaign.source === 'gmaps' || campaign.source === 'yelp') && (
         <EnrichmentBanner
           run={enrichRun}
           elapsedMs={enrichElapsedMs}
@@ -222,8 +237,8 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
                   <>
                     <th className="py-3 px-3">Business</th>
                     <th className="py-3 px-3">Phone</th>
+                    <th className="py-3 px-3">Email</th>
                     <th className="py-3 px-3">Rating</th>
-                    <th className="py-3 px-3">Price</th>
                     <th className="py-3 px-3">Neighborhood</th>
                     <th className="py-3 px-3">Notes</th>
                     <th className="py-3 px-3">Added</th>
@@ -252,7 +267,15 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
                   onEditNotes: () => setEditingNotes(l),
                 };
                 if (isLinkedIn) return <LeadRowLinkedIn {...common} />;
-                if (isYelp)     return <LeadRowYelp {...common} />;
+                if (isYelp)     return (
+                  <LeadRowYelp
+                    {...common}
+                    justFetched={yelpJustFetched?.has(l.id)}
+                    onEditEmail={() => setEditingEmail(l)}
+                    searching={enrichRun?.currentLeadId === l.id}
+                    justFound={enrichJustFound?.has(l.id)}
+                  />
+                );
                 return (
                   <LeadRow
                     {...common}
@@ -307,14 +330,14 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
       </div>
 
       {/* Bulk action bar — extracted to <BulkActionsBar />.
-          Find Email is gmaps-only — yelp/linkedin rows don't render an
-          email column in this prototype, so the action would have no visible
-          effect there. */}
+          Find Email is enabled for any source whose leads carry websites —
+          gmaps + yelp. LinkedIn leads have no website field so the action
+          would have nothing to crawl. */}
       <BulkActionsBar
         count={selected.size}
         onClear={clearSelection}
         actions={[
-        ...(campaign.source === 'gmaps' ? [{
+        ...((campaign.source === 'gmaps' || campaign.source === 'yelp') ? [{
           type: 'button',
           label: 'Find email',
           icon: <IconMail size={14} />,
@@ -368,7 +391,7 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
         onClose={() => setEditingEmail(null)}
         onSave={(email) => {onLeadEmailChange?.(editingEmail.id, email);setEditingEmail(null);}}
         onFindEmail={() => { onFindEmails?.([editingEmail.id]); setEditingEmail(null); }}
-        canEnrich={campaign.source === 'gmaps'} />
+        canEnrich={campaign.source === 'gmaps' || campaign.source === 'yelp'} />
       }
     </div>);
 
@@ -446,43 +469,27 @@ function StatusCell({ status, onChange }) {
 }
 
 // ── Star rating cell (Yelp) ──
-// Shows 5 stars filled to the lead's rating; numeric rating + review count
-// trail on the right. Half-star approximated via opacity for simplicity —
-// half-stars are very nice-to-have, not core to the design vocabulary.
+// Compact: one Yelp-red star, the numeric rating, and the review count in
+// parens. Resists growing the column — the rating is a glanceable signal,
+// not the focus of the row.
 function YelpRating({ rating, reviews }) {
-  const full = Math.floor(rating);
-  const has  = rating - full >= 0.25 && rating - full < 0.75;
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex items-center">
-        {[0, 1, 2, 3, 4].map((i) => {
-          const filled = i < full;
-          const half   = i === full && has;
-          return (
-            <IconStar
-              key={i} size={14}
-              className={cx(
-                filled ? 'text-[#d32323]' : half ? 'text-[#d32323]/60' : 'text-line dark:text-d-line',
-              )}
-              fill={filled || half ? 'currentColor' : 'none'}
-              strokeWidth={filled || half ? 0 : 2}
-            />
-          );
-        })}
-      </div>
-      <span className="text-[12px] tabular-nums text-body dark:text-d-body font-medium">{rating.toFixed(1)}</span>
-      <span className="text-[11px] text-mute tabular-nums">({reviews})</span>
+    <div className="inline-flex items-center gap-1 whitespace-nowrap">
+      <IconStar size={13} className="text-[#d32323] shrink-0" fill="currentColor" strokeWidth={0} />
+      <span className="text-[13px] tabular-nums text-ink dark:text-d-ink font-semibold">{rating.toFixed(1)}</span>
+      <span className="text-[11.5px] text-mute tabular-nums">({reviews.toLocaleString()})</span>
     </div>
   );
 }
 
 // ── Yelp lead row ──
-function LeadRowYelp({ lead, selected, onToggle, onStatusChange, onEditNotes }) {
+function LeadRowYelp({ lead, selected, onToggle, onStatusChange, onEditNotes, justFetched, onEditEmail, searching, justFound }) {
   return (
     <tr className={cx(
       'group border-t border-line/60 dark:border-d-line/60 text-[14px]',
       'hover:bg-canvas-soft/60 dark:hover:bg-d-canvas-soft/60 transition-colors',
-      selected && 'bg-primary-pale/40 dark:bg-primary/10'
+      selected && 'bg-primary-pale/40 dark:bg-primary/10',
+      (justFetched || justFound) && 'flash-found'
     )}>
       <td className="py-3.5 pl-5 pr-3"><Checkbox checked={selected} onChange={onToggle} /></td>
 
@@ -496,7 +503,7 @@ function LeadRowYelp({ lead, selected, onToggle, onStatusChange, onEditNotes }) 
         <div className="text-[12px] text-mute mt-0.5 truncate max-w-[220px]">{lead.primaryCategory}</div>
       </td>
 
-      <td className="py-3.5 px-3">
+      <td className="py-3.5 px-3 whitespace-nowrap">
         {lead.phone ? (
           <a href={`tel:${lead.phone}`} className="text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink tabular-nums inline-flex items-center gap-1.5">
             <IconPhone size={12} className="text-mute" />{lead.phone}
@@ -504,11 +511,40 @@ function LeadRowYelp({ lead, selected, onToggle, onStatusChange, onEditNotes }) 
         ) : <span className="text-mute">—</span>}
       </td>
 
-      <td className="py-3.5 px-3"><YelpRating rating={lead.rating} reviews={lead.reviews} /></td>
+      {/* Email cell — same vocabulary as gmaps. Yelp leads carry a websiteUrl
+          so Phase 6 enrichment works on them with zero source-specific code
+          (Phase 7 §3). Clicking opens the EmailModal with the Find-email
+          auto-panel for leads that don't have an email yet. */}
+      <td className="py-3.5 px-3 min-w-[200px]">
+        {lead.email ? (
+          <button onClick={onEditEmail} className={cx(
+            'inline-flex items-center gap-1.5 text-body dark:text-d-body hover:text-ink dark:hover:text-d-ink truncate max-w-[220px]',
+            justFound && 'pop-email text-ink dark:text-d-ink font-medium'
+          )} title={lead.email}>
+            <IconMail size={12} className={cx('shrink-0', justFound ? 'text-primary' : 'text-mute')} />
+            <span className="truncate">{lead.email}</span>
+            {justFound && <IconSparkles size={11} className="text-positive shrink-0" />}
+          </button>
+        ) : searching ? (
+          <SearchingPill />
+        ) : (
+          <button onClick={onEditEmail} className="text-mute hover:text-ink dark:hover:text-d-ink text-[13px] inline-flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+            <IconMail size={12} /> Add email
+          </button>
+        )}
+      </td>
 
-      <td className="py-3.5 px-3">
-        <span className="inline-flex items-center text-[13px] font-semibold text-positive tabular-nums">{lead.price}</span>
-        <span className="text-[13px] text-line dark:text-d-line tabular-nums">{'$$$$'.slice(lead.price.length)}</span>
+      {/* Rating + Price stacked: one red star + numeric rating + review count
+          on top; dollar-signs row below. Kept narrow on purpose — this is
+          glanceable metadata, not the row's focal point. */}
+      <td className="py-3.5 px-3 w-[1%] whitespace-nowrap">
+        <div className="flex flex-col gap-0.5">
+          <YelpRating rating={lead.rating} reviews={lead.reviews} />
+          <div className="leading-none">
+            <span className="text-[12px] font-semibold text-positive tabular-nums">{lead.price}</span>
+            <span className="text-[12px] text-line dark:text-d-line tabular-nums">{'$$$$'.slice(lead.price.length)}</span>
+          </div>
+        </div>
       </td>
 
       <td className="py-3.5 px-3 max-w-[180px]">

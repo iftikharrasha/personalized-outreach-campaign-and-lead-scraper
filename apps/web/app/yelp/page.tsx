@@ -1,7 +1,6 @@
 "use client";
 import { CreateCampaignModal } from "@/components/campaigns/create-campaign-modal";
 import { EditCampaignModal } from "@/components/campaigns/edit-campaign-modal";
-import { RunCampaignModal } from "@/components/campaigns/run-campaign-modal";
 import { YelpRunModal } from "@/components/campaigns/yelp-run-modal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,8 +11,6 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { Tabs } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import type { Campaign } from "@prisma/client";
-// apiOffset / apiKeywordUsed / apiTotalAvailable added by migration 20260522231355.
-// Prisma client type will include them once the DLL lock is released and `prisma generate` runs.
 type CampaignWithStats = Campaign & {
   contactedLeads:    number;
   apiOffset:         number;
@@ -42,7 +39,7 @@ function countryLabel(code: string) {
 function useLatestRun(campaignId: string) {
   return useQuery<{ id: string; status: string; newLeadsCount: number; startedAt: string | null; finishedAt: string | null } | null>({
     queryKey: ["latestRun", campaignId],
-    queryFn: async () => {
+    queryFn:  async () => {
       const res = await fetch(`/api/campaigns/${campaignId}/runs`);
       if (!res.ok) return null;
       const runs = await res.json() as { id: string; status: string; newLeadsCount: number; startedAt: string | null; finishedAt: string | null }[];
@@ -60,7 +57,7 @@ function formatRunLabel(run: { status: string; newLeadsCount: number; finishedAt
   const timeAgo = when ? (() => {
     const diff = Date.now() - new Date(when).getTime();
     const mins = Math.floor(diff / 60000);
-    const hrs = Math.floor(diff / 3600000);
+    const hrs  = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
     if (mins < 1) return "just now";
     if (mins < 60) return `${mins}m ago`;
@@ -70,24 +67,22 @@ function formatRunLabel(run: { status: string; newLeadsCount: number; finishedAt
 
   if (run.status === "RUNNING") return <span className="text-primary font-medium flex items-center gap-1"><Loader2 size={11} className="animate-spin" />Running…</span>;
   if (run.status === "PENDING") return <span className="text-mute flex items-center gap-1"><Loader2 size={11} className="animate-spin" />Queued…</span>;
-  if (run.status === "FAILED") return <span className="text-negative">Failed {timeAgo}</span>;
+  if (run.status === "FAILED")    return <span className="text-negative">Failed {timeAgo}</span>;
   if (run.status === "CANCELLED") return <span className="text-mute">Cancelled {timeAgo}</span>;
-  return <span>{run.newLeadsCount} leads · {timeAgo}</span>;
+  return <span>{run.newLeadsCount} fetched · {timeAgo}</span>;
 }
 
 function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: (c: CampaignWithStats) => void; onRefetch: () => void }) {
   const toast = useToast();
-  const qc = useQueryClient();
+  const qc    = useQueryClient();
   const isArchived = c.status === "ARCHIVED";
   const isPaused   = c.status === "PAUSED";
-  const isYelp     = c.source === "yelp";
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [runModalOpen, setRunModalOpen]   = React.useState(false);
 
   const { data: latestRun } = useLatestRun(c.id);
   const isActiveRun = latestRun?.status === "RUNNING" || latestRun?.status === "PENDING";
 
-  // When an active run finishes, refresh the campaign list to get updated totalLeads
   const prevRunStatus = React.useRef(latestRun?.status);
   React.useEffect(() => {
     const prev = prevRunStatus.current;
@@ -100,26 +95,17 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
 
   const patchStatus = async (status: string) => {
     await fetch(`/api/campaigns/${c.id}`, {
-      method: "PUT",
+      method:  "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
+      body:    JSON.stringify({ status }),
     });
     onRefetch();
   };
 
-  const handlePause = async () => {
-    await patchStatus("PAUSED");
-    toast.show({ type: "success", title: "Campaign paused", message: `${c.name} won't run until resumed.` });
-  };
-  const handleRestore = async () => {
-    await patchStatus("ACTIVE");
-    toast.show({ type: "success", title: isArchived ? "Campaign restored" : "Campaign resumed", message: c.name });
-  };
-  const handleArchive = async () => {
-    await patchStatus("ARCHIVED");
-    toast.show({ type: "success", title: "Campaign archived", message: `${c.name} moved to Archived.` });
-  };
-  const handleDelete = async () => {
+  const handlePause   = async () => { await patchStatus("PAUSED");    toast.show({ type: "success", title: "Campaign paused",    message: `${c.name} won't run until resumed.` }); };
+  const handleRestore = async () => { await patchStatus("ACTIVE");    toast.show({ type: "success", title: isArchived ? "Campaign restored" : "Campaign resumed", message: c.name }); };
+  const handleArchive = async () => { await patchStatus("ARCHIVED");  toast.show({ type: "success", title: "Campaign archived",  message: `${c.name} moved to Archived.` }); };
+  const handleDelete  = async () => {
     await fetch(`/api/campaigns/${c.id}`, { method: "DELETE" });
     toast.show({ type: "success", title: "Campaign deleted", message: `"${c.name}" and all its leads have been removed.` });
     onRefetch();
@@ -136,36 +122,26 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
       <Card className="p-6 flex flex-col gap-4 border-2 border-negative/40">
         <div>
           <p className="text-[15px] font-semibold text-ink dark:text-d-ink">Delete "{c.name}"?</p>
-          <p className="text-[13px] text-mute mt-1">This permanently deletes the campaign and all its leads. This cannot be undone.</p>
+          <p className="text-[13px] text-mute mt-1">This permanently deletes the campaign and all its leads. Cannot be undone.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setConfirmDelete(false)}
-            className="flex-1 text-sm font-medium px-4 py-2 rounded-[14px] bg-canvas-soft dark:bg-d-canvas hover:bg-line dark:hover:bg-d-line text-ink dark:text-d-ink transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleDelete}
-            className="flex-1 text-sm font-semibold px-4 py-2 rounded-[14px] bg-negative text-white hover:bg-[#b62a30] transition-colors"
-          >
-            Yes, Delete!
-          </button>
+          <button onClick={() => setConfirmDelete(false)} className="flex-1 text-sm font-medium px-4 py-2 rounded-[14px] bg-canvas-soft dark:bg-d-canvas hover:bg-line dark:hover:bg-d-line text-ink dark:text-d-ink transition-colors">Cancel</button>
+          <button onClick={handleDelete}                  className="flex-1 text-sm font-semibold px-4 py-2 rounded-[14px] bg-negative text-white hover:bg-[#b62a30] transition-colors">Yes, Delete!</button>
         </div>
       </Card>
     );
   }
+
+  const fullyFetched = c.apiTotalAvailable !== null && c.apiOffset >= c.apiTotalAvailable;
 
   return (
     <>
       <Card className="p-6 group hover:-translate-y-[2px] transition-transform duration-200 cursor-default flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            {isYelp && (
-              <span className="inline-flex items-center rounded-full bg-[#FF1A1A]/10 text-[#FF1A1A] text-[10px] font-bold px-2 py-0.5 tracking-wide mb-1">
-                YELP
-              </span>
-            )}
+            <span className="inline-flex items-center rounded-full bg-[#FF1A1A]/10 text-[#FF1A1A] text-[10px] font-bold px-2 py-0.5 tracking-wide mb-1">
+              YELP
+            </span>
             <h3 className="text-[17px] font-semibold text-ink dark:text-d-ink leading-snug truncate">{c.name}</h3>
             <div className="text-[13px] text-mute mt-0.5 truncate">{c.keyword}</div>
           </div>
@@ -176,13 +152,9 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
               </button>
             }
             items={[
-              { label: "Edit", icon: <Pencil size={14} />, onClick: () => onEdit(c) },
+              { label: "Edit",   icon: <Pencil size={14} />, onClick: () => onEdit(c) },
               { divider: true },
-              {
-                label: isArchived ? "Restore" : "Archive",
-                icon: isArchived ? <RotateCcw size={14} /> : <Archive size={14} />,
-                onClick: isArchived ? handleRestore : handleArchive,
-              },
+              { label: isArchived ? "Restore" : "Archive", icon: isArchived ? <RotateCcw size={14} /> : <Archive size={14} />, onClick: isArchived ? handleRestore : handleArchive },
               { divider: true },
               { label: "Delete", icon: <Trash2 size={14} />, onClick: () => setConfirmDelete(true), danger: true },
             ]}
@@ -195,6 +167,11 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
             {countryLabel(c.country)} · {abbrevState(c.state)}{c.city ? ` · ${c.city}` : ""}
           </span>
           <StatusDot status={c.status} />
+          {fullyFetched && (
+            <span className="inline-flex items-center rounded-full bg-positive/10 text-positive text-[10.5px] font-semibold px-2 py-0.5">
+              All fetched
+            </span>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -208,6 +185,7 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
           </div>
         </div>
 
+        {/* Outreach progress */}
         <div>
           {(() => {
             const pct = c.totalLeads > 0 ? Math.round((c.contactedLeads / c.totalLeads) * 100) : 0;
@@ -223,10 +201,10 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
           })()}
         </div>
 
-        {/* Yelp fetch progress — shown after first run */}
-        {isYelp && c.apiOffset > 0 && (
-          <div className="text-[12px] text-mute flex items-center justify-between gap-1.5">
-            <span className="tabular-nums">
+        {/* Yelp fetch cursor */}
+        {c.apiOffset > 0 && (
+          <div className="text-[12px] flex items-center justify-between gap-1.5">
+            <span className="text-mute tabular-nums">
               {c.apiOffset.toLocaleString()} fetched
               {c.apiTotalAvailable != null ? ` · ${c.apiTotalAvailable.toLocaleString()} available` : ""}
             </span>
@@ -252,11 +230,11 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
               size="sm"
               variant={isActiveRun ? "ghost" : "primary"}
               leftIcon={isActiveRun ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-              disabled={isPaused || isActiveRun}
+              disabled={isPaused || isActiveRun || fullyFetched}
               onClick={() => setRunModalOpen(true)}
               className="flex-1"
             >
-              {isActiveRun ? "Running…" : "Run"}
+              {isActiveRun ? "Running…" : fullyFetched ? "Done" : "Run"}
             </Button>
           )}
           {!isArchived && (
@@ -274,22 +252,13 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
         </div>
       </Card>
 
-      {!isArchived && (
-        isYelp ? (
-          <YelpRunModal
-            open={runModalOpen}
-            campaign={c}
-            onClose={() => setRunModalOpen(false)}
-            onStarted={handleRunStarted}
-          />
-        ) : (
-          <RunCampaignModal
-            open={runModalOpen}
-            campaign={c}
-            onClose={() => setRunModalOpen(false)}
-            onStarted={handleRunStarted}
-          />
-        )
+      {!isArchived && !fullyFetched && (
+        <YelpRunModal
+          open={runModalOpen}
+          campaign={c}
+          onClose={() => setRunModalOpen(false)}
+          onStarted={handleRunStarted}
+        />
       )}
     </>
   );
@@ -298,25 +267,25 @@ function CampaignCard({ c, onEdit, onRefetch }: { c: CampaignWithStats; onEdit: 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="mt-24 flex flex-col items-center text-center max-w-[440px] mx-auto">
-      <div className="w-20 h-20 rounded-full bg-canvas dark:bg-d-canvas flex items-center justify-center text-mute mb-6">
-        <MapPin size={36} />
+      <div className="w-20 h-20 rounded-full bg-[#FF1A1A]/10 flex items-center justify-center mb-6">
+        <span className="text-[#FF1A1A] text-[28px] font-black">Y</span>
       </div>
-      <h2 className="text-[24px] font-semibold text-ink dark:text-d-ink">No campaigns yet</h2>
+      <h2 className="text-[24px] font-semibold text-ink dark:text-d-ink">No Yelp campaigns yet</h2>
       <p className="text-[14px] text-mute mt-2 leading-relaxed">
-        Create your first campaign to start scraping leads from Google Maps. Each campaign is a single keyword tied to a location.
+        Create a Yelp campaign to fetch leads from the official Yelp API. Each campaign targets one keyword in one city.
       </p>
       <Button variant="primary" size="lg" leftIcon={<Plus size={16} />} onClick={onCreate} className="mt-7">
-        Create your first campaign
+        Create first Yelp campaign
       </Button>
     </div>
   );
 }
 
-export default function CampaignListPage() {
+export default function YelpPage() {
   const qc = useQueryClient();
   const { data: campaigns = [], isLoading } = useQuery<CampaignWithStats[]>({
-    queryKey: ["campaigns"],
-    queryFn: () => fetch("/api/campaigns").then((r) => r.json()),
+    queryKey: ["campaigns", "yelp"],
+    queryFn:  () => fetch("/api/campaigns?source=yelp").then((r) => r.json()),
   });
 
   const { data: appConfig } = useQuery<{ yelpKeyConfigured: boolean }>({
@@ -325,25 +294,25 @@ export default function CampaignListPage() {
     staleTime: 60_000,
   });
 
-  const [search, setSearch] = React.useState("");
-  const [tab, setTab] = React.useState("all");
-  const [createOpen, setCreateOpen] = React.useState(false);
+  const [search, setSearch]               = React.useState("");
+  const [tab, setTab]                     = React.useState("all");
+  const [createOpen, setCreateOpen]       = React.useState(false);
   const [editingCampaign, setEditingCampaign] = React.useState<CampaignWithStats | null>(null);
 
-  const refetch = () => qc.invalidateQueries({ queryKey: ["campaigns"] });
+  const refetch = () => qc.invalidateQueries({ queryKey: ["campaigns", "yelp"] });
 
   const filtered = React.useMemo(() => {
     return campaigns.filter((c) => {
       const matchSearch = !search || (c.name + c.keyword).toLowerCase().includes(search.toLowerCase());
-      const matchTab = tab === "all" || c.status.toLowerCase() === tab;
+      const matchTab    = tab === "all" || c.status.toLowerCase() === tab;
       return matchSearch && matchTab;
     });
   }, [campaigns, search, tab]);
 
   const counts = React.useMemo(() => ({
-    all: campaigns.length,
-    active: campaigns.filter((c) => c.status === "ACTIVE").length,
-    paused: campaigns.filter((c) => c.status === "PAUSED").length,
+    all:      campaigns.length,
+    active:   campaigns.filter((c) => c.status === "ACTIVE").length,
+    paused:   campaigns.filter((c) => c.status === "PAUSED").length,
     archived: campaigns.filter((c) => c.status === "ARCHIVED").length,
   }), [campaigns]);
 
@@ -353,8 +322,13 @@ export default function CampaignListPage() {
     <div className="px-8 py-10 max-w-[1480px] mx-auto">
       <div className="flex items-start justify-between gap-6 flex-wrap">
         <div>
-          <h1 className="text-[32px] sm:text-[36px] font-bold text-ink dark:text-d-ink leading-tight tracking-tight">Campaigns</h1>
-          <p className="text-[14px] text-mute mt-1.5">{counts.active} active · {totalLeads} leads scraped</p>
+          <div className="flex items-center gap-2.5 mb-1">
+            <span className="inline-flex items-center rounded-full bg-[#FF1A1A]/10 text-[#FF1A1A] text-[11px] font-bold px-2.5 py-1 tracking-wide">
+              YELP API
+            </span>
+          </div>
+          <h1 className="text-[32px] sm:text-[36px] font-bold text-ink dark:text-d-ink leading-tight tracking-tight">Yelp Campaigns</h1>
+          <p className="text-[14px] text-mute mt-1.5">{counts.active} active · {totalLeads} leads fetched</p>
         </div>
         <Button variant="primary" size="lg" leftIcon={<Plus size={16} />} onClick={() => setCreateOpen(true)}>
           New Campaign
@@ -378,9 +352,9 @@ export default function CampaignListPage() {
               value={tab}
               onChange={setTab}
               items={[
-                { value: "all", label: "All", count: counts.all },
-                { value: "active", label: "Active", count: counts.active },
-                { value: "paused", label: "Paused", count: counts.paused },
+                { value: "all",      label: "All",      count: counts.all },
+                { value: "active",   label: "Active",   count: counts.active },
+                { value: "paused",   label: "Paused",   count: counts.paused },
                 { value: "archived", label: "Archived", count: counts.archived },
               ]}
             />
@@ -397,7 +371,14 @@ export default function CampaignListPage() {
         </>
       )}
 
-      <CreateCampaignModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={refetch} yelpKeyConfigured={appConfig?.yelpKeyConfigured ?? true} />
+      {/* Create modal — locked to Yelp source */}
+      <CreateCampaignModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={refetch}
+        yelpKeyConfigured={appConfig?.yelpKeyConfigured ?? true}
+        defaultSource="yelp"
+      />
       <EditCampaignModal
         open={!!editingCampaign}
         campaign={editingCampaign}

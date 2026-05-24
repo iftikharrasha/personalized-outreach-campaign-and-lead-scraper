@@ -6,7 +6,11 @@
       "Bash(npx tsc *)",
       "Read(//e/Github/**)",
       "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")",
-      "Bash(mkdir -p \"e:/Github/personalized-outreach-campaign-and-lead-scraper/apps/web/app/api/enrich/[runId]/cancel\")"
+      "Bash(mkdir -p \"e:/Github/personalized-outreach-campaign-and-lead-scraper/apps/web/app/api/enrich/[runId]/cancel\")",
+      "Bash(npx prisma *)",
+      "PowerShell(Get-Process -Name \"node\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Name \"node\" -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(npx --prefix \"e:\\\\Github\\\\personalized-outreach-campaign-and-lead-scraper\" prisma generate 2>&1)"
     ],
     "additionalDirectories": [
       "e:\\Github\\personalized-outreach-campaign-and-lead-scraper\\apps\\web\\app\\api\\enrich\\[runId]"

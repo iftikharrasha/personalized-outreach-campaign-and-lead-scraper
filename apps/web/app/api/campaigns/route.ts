@@ -2,8 +2,10 @@ import { db } from "@/lib/db";
 import { CampaignStatus } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const source = req.nextUrl.searchParams.get("source") ?? undefined;
   const campaigns = await db.campaign.findMany({
+    where:   source ? { source } : undefined,
     orderBy: { createdAt: "desc" },
     include: {
       _count: {
@@ -25,7 +27,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
 
-  const { name, keyword, category, country, state, city, notifyEmail } = body;
+  const { name, keyword, category, source, country, state, city, notifyEmail } = body;
 
   if (!name?.trim() || name.trim().length > 255)
     return NextResponse.json({ error: "name is required (max 255 chars)" }, { status: 422 });
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
       country: country.trim(),
       state: state.trim(),
       city: city?.trim() ?? null,
-      source: "google_maps",
+      source: source === "yelp" ? "yelp" : "google_maps",
       status: CampaignStatus.ACTIVE,
       notifyEmail: notifyEmail?.trim() ?? null,
     },

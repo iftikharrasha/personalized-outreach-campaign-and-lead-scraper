@@ -2,9 +2,17 @@ import { db } from "@/lib/db";
 import { LeadStatus, type Lead, type Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 
+// Strip leading emoji / pictograph characters (e.g. the 📍 pin Google Maps
+// prepends to address strings before they are stored in the DB).
+function stripLeadingEmoji(s: string): string {
+  // Matches any leading characters in Unicode Emoji / Pictographic blocks.
+  return s.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+/u, "").trimStart();
+}
+
 // Escape a value for a CSV cell: wrap in quotes, double any inner quotes.
-function csvCell(value: string | null | undefined): string {
-  const s = value ?? "";
+function csvCell(value: string | null | undefined, stripEmoji = false): string {
+  let s = value ?? "";
+  if (stripEmoji) s = stripLeadingEmoji(s);
   return `"${s.replace(/"/g, '""')}"`;
 }
 
@@ -21,11 +29,12 @@ function toCsv(leads: Lead[]): string {
     csvCell(l.normalizedDomain),
     csvCell(l.status),
     csvCell(l.notes),
-    csvCell(l.address),
+    csvCell(l.address, true),  // strip leading pin emoji
     csvCell(l.createdAt.toISOString()),
     csvCell(l.updatedAt.toISOString()),
   ].join(","));
-  return [header.map(csvCell).join(","), ...rows].join("\r\n");
+  // UTF-8 BOM ensures Excel opens the file as UTF-8 (required for non-Latin scripts).
+  return "﻿" + [header.map(csvCell).join(","), ...rows].join("\r\n");
 }
 
 function slugify(name: string): string {
