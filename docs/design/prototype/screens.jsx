@@ -7,6 +7,7 @@ function Sidebar({ collapsed, onToggle, active = 'home', onNavigate }) {
     { id: 'gmaps',    icon: <IconMapPin    size={20} />, label: 'Google Maps' },
     { id: 'yelp',     icon: <IconStar      size={20} />, label: 'Yelp' },
     { id: 'linkedin', icon: <IconBriefcase size={20} />, label: 'LinkedIn' },
+    { id: 'inbox',    icon: <IconMail      size={20} />, label: 'Inbox' },
   ];
 
   const futureItems = [

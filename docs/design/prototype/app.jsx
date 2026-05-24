@@ -29,9 +29,16 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const SIDEBAR_TO_SOURCE = { gmaps: 'gmaps', yelp: 'yelp', linkedin: 'linkedin' };
 const SOURCE_TO_SIDEBAR = { gmaps: 'gmaps', yelp: 'yelp', linkedin: 'linkedin' };
 
+// Stable id generator for new inbox entities
+let _inboxIdCounter = 1000;
+const newInboxId = (prefix) => `${prefix}_${Date.now().toString(36)}_${_inboxIdCounter++}`;
+
 function App() {
   const [dark, setDark] = useDarkMode();
   const [collapsed, setCollapsed] = useState(false);
+  // Track the user's preferred sidebar width separately so we can force-
+  // collapse on /inbox routes (mail-client convention) and restore on exit.
+  const userPrefCollapsedRef = useRef(false);
   const [campaigns, setCampaigns] = useState(seedCampaigns);
   // Leads are stored per-campaign so the table only ever renders the right
   // shape. Yelp + LinkedIn leads have different fields from gmaps leads;
@@ -65,6 +72,16 @@ function App() {
   const [yelpJustFetchedIds, setYelpJustFetchedIds] = useState(new Set());
   const yelpJustFetchedTimersRef = useRef(new Map());
 
+  // Inbox state — threads keyed by campaign. Mirrors §4 of PHASE_8_INBOX.md:
+  // thread is anchored to a recipient group at creation, messages always
+  // send to that group (with optional skips). Pending selection is the
+  // Zustand-bridge analog from §6, kept here as React state since this is
+  // a single-page prototype — refreshes still drop it on the floor.
+  const [inboxThreadsByCampaign, setInboxThreadsByCampaign] = useState(seedInboxThreads);
+  const [pendingInboxSelection, setPendingInboxSelection] = useState(null);
+  const [activeInboxCampaignId, setActiveInboxCampaignId] = useState('c1');
+  const [activeInboxThreadId, setActiveInboxThreadId] = useState(() => seedInboxThreads.c1?.[0]?.id || null);
+
   const toast = useToast();
 
   // Tweaks
@@ -89,6 +106,18 @@ function App() {
   }, [t.simulateScraping, route]);
 
   useEffect(() => { setCollapsed(!!t.compactSidebar); }, [t.compactSidebar]);
+
+  // Inbox = three pane → auto-collapse the app sidebar so both extra rails fit.
+  // Restore the user's previous preference on leave. (§10 of PHASE_8_INBOX.md)
+  useEffect(() => {
+    if (route.name === 'inbox') {
+      userPrefCollapsedRef.current = collapsed || !!t.compactSidebar;
+      setCollapsed(true);
+    } else {
+      setCollapsed(userPrefCollapsedRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.name]);
 
   // Enrichment engine — driven by the simulator hook from enrichment.jsx.
   // The hook is the source of truth for run state; we react to its callbacks
@@ -389,10 +418,139 @@ function App() {
       setRoute({ name: 'detail', source: c.source || 'gmaps', id: c.id });
     }
   };
+  const goInbox = () => setRoute({ name: 'inbox' });
   const handleNav = (id) => {
-    if (id === 'home') return goHome();
+    if (id === 'home')  return goHome();
+    if (id === 'inbox') return goInbox();
     const source = SIDEBAR_TO_SOURCE[id];
     if (source) return goList(source);
+  };
+
+  // ── Inbox mutations ────────────────────────────────────────────────────
+  // Each mirrors a single API route from §9 of PHASE_8_INBOX.md.
+
+  // POST /api/inbox/threads
+  const createInboxThread = (campaignId, recipients) => {
+    if (!recipients?.length) return null;
+    const id = newInboxId('th');
+    const now = Date.now();
+    const rel = 'just now';
+    const thread = {
+      id, campaignId,
+      createdAtRel: rel,
+      updatedAtRel: rel,
+      updatedAtMs: now,
+      recipients: recipients.map((r) => ({
+        leadId: r.leadId ?? r.id ?? null,
+        email: r.email,
+        name: r.name || null,
+      })),
+      messages: [],
+      lastSubject: '(no messages yet)',
+    };
+    setInboxThreadsByCampaign((prev) => ({
+      ...prev,
+      [campaignId]: [thread, ...(prev[campaignId] || [])],
+    }));
+    return id;
+  };
+
+  // POST /api/inbox/threads/[threadId]/messages
+  const sendInboxMessage = (threadId, payload) => {
+    const now = Date.now();
+    const messageRecipients = payload.recipients.map((r) => ({
+      email: r.email,
+      status: r.status || 'SENT',
+      smtpMessageId: r.smtpMessageId,
+      errorMessage: r.errorMessage,
+    }));
+    const sent = messageRecipients.filter((r) => r.status === 'SENT').length;
+    const failed = messageRecipients.filter((r) => r.status === 'FAILED').length;
+    const overall =
+      sent === 0 && failed > 0 ? 'FAILED' :
+      failed > 0 ? 'PARTIAL' :
+      sent > 0 ? 'SENT' : 'DRAFT';
+    const newMessage = {
+      id: newInboxId('msg'),
+      subject: payload.subject,
+      fromAddress: MAILHOG_FROM,
+      html: payload.html || '',
+      text: payload.text || '',
+      sentAtRel: 'just now',
+      status: overall,
+      recipients: messageRecipients,
+    };
+    setInboxThreadsByCampaign((prev) => {
+      const out = { ...prev };
+      for (const cid of Object.keys(out)) {
+        out[cid] = out[cid].map((t) => {
+          if (t.id !== threadId) return t;
+          const messages = [...t.messages, newMessage];
+          return {
+            ...t,
+            messages,
+            updatedAtMs: now,
+            updatedAtRel: 'just now',
+            lastSubject: newMessage.subject,
+          };
+        });
+      }
+      return out;
+    });
+  };
+
+  // DELETE /api/inbox/messages/[messageId]
+  const deleteInboxMessage = (threadId, messageId) => {
+    setInboxThreadsByCampaign((prev) => {
+      const out = { ...prev };
+      for (const cid of Object.keys(out)) {
+        out[cid] = out[cid].map((t) => {
+          if (t.id !== threadId) return t;
+          const messages = t.messages.filter((m) => m.id !== messageId);
+          const last = messages[messages.length - 1];
+          return { ...t, messages, lastSubject: last?.subject || '(no messages)' };
+        });
+      }
+      return out;
+    });
+    toast.show({ type: 'success', title: 'Message deleted', message: 'Stored HTML file removed.' });
+  };
+
+  // DELETE /api/inbox/threads/[threadId]
+  const deleteInboxThread = (threadId) => {
+    let owningCampaign = null;
+    setInboxThreadsByCampaign((prev) => {
+      const out = { ...prev };
+      for (const cid of Object.keys(out)) {
+        if (out[cid].some((t) => t.id === threadId)) owningCampaign = cid;
+        out[cid] = out[cid].filter((t) => t.id !== threadId);
+      }
+      return out;
+    });
+    if (activeInboxThreadId === threadId) setActiveInboxThreadId(null);
+    toast.show({ type: 'success', title: 'Thread deleted', message: 'Thread and all messages removed.' });
+  };
+
+  // Campaign page → Inbox: pre-flight then route
+  const openInboxFromCampaign = (campaignId, leads, opts = {}) => {
+    if (!leads.length) {
+      toast.show({
+        type: 'warning',
+        title: 'None of the selected leads have an email',
+        message: 'Use Find Email first, or enter emails manually before sending outreach.',
+      });
+      return;
+    }
+    if (opts.skipped) {
+      toast.show({
+        type: 'warning',
+        title: `${opts.skipped} lead${opts.skipped === 1 ? '' : 's'} skipped`,
+        message: `${opts.skipped} selected lead${opts.skipped === 1 ? ' has' : 's have'} no email — opening Inbox with the rest.`,
+      });
+    }
+    setPendingInboxSelection({ campaignId, leads });
+    setActiveInboxCampaignId(campaignId);
+    goInbox();
   };
 
   // Campaign mutations
@@ -492,13 +650,17 @@ function App() {
   const currentCampaign = route.name === 'detail' ? campaigns.find(c => c.id === route.id) : null;
   const currentLeads = route.name === 'detail' ? (leadsByCampaign[route.id] || []) : [];
   const currentSource = route.source || 'gmaps';
-  const sidebarActive = route.name === 'home' ? 'home' : SOURCE_TO_SIDEBAR[currentSource] || 'gmaps';
+  const sidebarActive =
+    route.name === 'home'  ? 'home'  :
+    route.name === 'inbox' ? 'inbox' :
+    SOURCE_TO_SIDEBAR[currentSource] || 'gmaps';
   const visibleCampaigns = (route.name === 'list' || route.name === 'detail')
     ? campaigns.filter((c) => (c.source || 'gmaps') === currentSource)
     : campaigns;
 
   const breadcrumb =
     route.name === 'home'   ? ['Outrich Manager'] :
+    route.name === 'inbox'  ? ['Outrich Manager', 'Inbox'] :
     route.name === 'list'   ? [SOURCES[currentSource].breadcrumb, 'Campaigns'] :
     /* detail */              [SOURCES[currentSource].breadcrumb, 'Campaigns', currentCampaign?.name || ''];
 
@@ -525,6 +687,26 @@ function App() {
               campaigns={campaigns}
               onOpenCampaign={(id) => goDetail(id)}
               onGoToScraper={() => goList('gmaps')}
+            />
+          ) : route.name === 'inbox' ? (
+            <InboxPage
+              campaigns={campaigns}
+              leadsByCampaign={leadsByCampaign}
+              threadsByCampaign={inboxThreadsByCampaign}
+              activeCampaignId={activeInboxCampaignId}
+              activeThreadId={activeInboxThreadId}
+              pendingSelection={pendingInboxSelection}
+              onSelectCampaign={(cid) => {
+                setActiveInboxCampaignId(cid);
+                const first = inboxThreadsByCampaign[cid]?.[0];
+                setActiveInboxThreadId(first?.id || null);
+              }}
+              onSelectThread={setActiveInboxThreadId}
+              onCreateThread={createInboxThread}
+              onSendMessage={sendInboxMessage}
+              onDeleteThread={deleteInboxThread}
+              onDeleteMessage={deleteInboxMessage}
+              onClearPending={() => setPendingInboxSelection(null)}
             />
           ) : t.showEmptyState ? (
             <CampaignListPage
@@ -573,6 +755,7 @@ function App() {
               yelpElapsedMs={yelpElapsedMs}
               yelpJustFetched={yelpJustFetchedIds}
               onStopYelpFetch={cancelYelpRun}
+              onOpenInbox={openInboxFromCampaign}
             />
           ) : (
             <div className="px-8 py-24 text-center text-mute">Campaign not found. <button className="text-ink dark:text-d-ink underline" onClick={() => goList('gmaps')}>Back to campaigns</button></div>

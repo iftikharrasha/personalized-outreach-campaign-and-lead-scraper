@@ -8,7 +8,7 @@
 // Stat cards, scraping banner, run history card, bulk actions stay identical
 // across sources — that's the spine of the design.
 
-function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit, scraping, onStopScraping, scrapingFound, onLeadStatusChange, onLeadNotesChange, onLeadEmailChange, onExport, enrichRun, enrichElapsedMs, enrichJustFound, onFindEmails, onStopEnrich, yelpRun, yelpElapsedMs, onStopYelpFetch, yelpJustFetched }) {
+function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit, scraping, onStopScraping, scrapingFound, onLeadStatusChange, onLeadNotesChange, onLeadEmailChange, onExport, enrichRun, enrichElapsedMs, enrichJustFound, onFindEmails, onStopEnrich, yelpRun, yelpElapsedMs, onStopYelpFetch, yelpJustFetched, onOpenInbox }) {
   const src = SOURCES[campaign.source] || SOURCES.gmaps;
   const isYelp     = campaign.source === 'yelp';
   const isLinkedIn = campaign.source === 'linkedin';
@@ -344,6 +344,30 @@ function CampaignDetailPage({ campaign, leads, onBack, onRun, onArchive, onEdit,
           highlight: true,
           onClick: () => {
             onFindEmails?.(Array.from(selected));
+            clearSelection();
+          }
+        }, { type: 'divider' }] : []),
+        // Phase 8 — Inbox button. Pre-flight: filter leads without an email
+        // and surface a confirm if some get skipped (§7 of PHASE_8_INBOX.md).
+        ...(onOpenInbox ? [{
+          type: 'button',
+          label: 'Inbox',
+          icon: <IconMail size={14} />,
+          onClick: () => {
+            const ids = Array.from(selected);
+            const picked = leads.filter((l) => ids.includes(l.id));
+            const withEmail = picked.filter((l) => l.email);
+            const missing = picked.length - withEmail.length;
+            if (withEmail.length === 0) {
+              // toast surfaced upstream; no-op here besides bailing
+              onOpenInbox(campaign.id, [], { reason: 'no-emails' });
+              clearSelection();
+              return;
+            }
+            if (missing > 0 && !window.confirm(`${missing} of ${picked.length} selected leads have no email and will be skipped.\n\nCreate the thread with the remaining ${withEmail.length} recipient${withEmail.length === 1 ? '' : 's'}?`)) {
+              return;
+            }
+            onOpenInbox(campaign.id, withEmail.map((l) => ({ id: l.id, email: l.email, name: l.name })), { skipped: missing });
             clearSelection();
           }
         }, { type: 'divider' }] : []),
